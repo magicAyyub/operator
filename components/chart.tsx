@@ -1,8 +1,18 @@
 "use client"
 
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts"
+import { AlertCircle } from "lucide-react"
 
-export function Chart({ data, color }) {
+export function Chart({ data, color, title }) {
+  if (!data || data.length === 0) {
+    return (
+      <div className="h-[140px] flex flex-col items-center justify-center text-center">
+        <AlertCircle className="h-8 w-8 text-muted-foreground mb-1" />
+        <p className="text-sm text-muted-foreground">(vide)</p>
+      </div>
+    )
+  }
+
   return (
     <div className="h-[140px]">
       <ResponsiveContainer width="100%" height="100%">

@@ -5,7 +5,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Button } from "@/components/ui/button"
 import { useSearchParams } from "next/navigation"
 import { useData } from "@/hooks/use-data"
-import { Download, ChevronLeft, ChevronRight, FileSpreadsheet, DatabaseIcon, AlertCircle, Database } from "lucide-react"
+import { Download, ChevronLeft, ChevronRight, FileSpreadsheet, AlertCircle, Database, FilterX } from "lucide-react"
 
 export function DataTable() {
   const [page, setPage] = useState(1)
@@ -44,6 +44,42 @@ export function DataTable() {
     }
   }
 
+  // Fonction pour formater les critères de filtrage de manière lisible
+  const getFilterDescription = () => {
+    const filters = []
+
+    if (searchParams.get("statut") && searchParams.get("statut") !== "all") {
+      filters.push(`Statut: ${searchParams.get("statut")}`)
+    }
+
+    if (searchParams.get("fa_statut") && searchParams.get("fa_statut") !== "all") {
+      filters.push(`2FA Statut: ${searchParams.get("fa_statut")}`)
+    }
+
+    if (
+      searchParams.get("limite_type") &&
+      searchParams.get("limite_valeur") &&
+      searchParams.get("limite_type") !== "none"
+    ) {
+      const operator = searchParams.get("limite_type") === "lt" ? "<" : ">"
+      filters.push(`Pourcentage IN ${operator} ${searchParams.get("limite_valeur")}%`)
+    }
+
+    if (searchParams.get("date_min")) {
+      filters.push(`Date min: ${new Date(searchParams.get("date_min")).toLocaleDateString()}`)
+    }
+
+    if (searchParams.get("date_max")) {
+      filters.push(`Date max: ${new Date(searchParams.get("date_max")).toLocaleDateString()}`)
+    }
+
+    if (searchParams.get("annee") && searchParams.get("annee") !== "all") {
+      filters.push(`Année: ${searchParams.get("annee")}`)
+    }
+
+    return filters
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center">
@@ -76,7 +112,10 @@ export function DataTable() {
             {isLoading ? (
               <TableRow>
                 <TableCell colSpan={6} className="h-24 text-center">
-                  Chargement des données...
+                  <div className="flex flex-col items-center justify-center">
+                    <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mb-2"></div>
+                    <p className="text-sm text-muted-foreground">Chargement des données...</p>
+                  </div>
                 </TableCell>
               </TableRow>
             ) : data.length === 0 ? (
@@ -85,22 +124,40 @@ export function DataTable() {
                   <div className="flex flex-col items-center justify-center text-center p-6">
                     <AlertCircle className="h-12 w-12 text-muted-foreground mb-4" />
                     <h3 className="text-lg font-medium mb-2">Aucune donnée trouvée</h3>
-                    <p className="text-muted-foreground mb-4">
-                      {searchParams.toString()
-                        ? "Aucune donnée ne correspond aux critères de filtrage actuels."
-                        : "Aucune donnée n'est disponible. Commencez par charger des données."}
-                    </p>
-                    <div className="flex gap-2">
-                      {searchParams.toString() ? (
+
+                    {searchParams.toString() ? (
+                      <>
+                        <p className="text-muted-foreground mb-2">
+                          Aucune donnée ne correspond aux critères de filtrage suivants:
+                        </p>
+
+                        <div className="bg-gray-50 p-3 rounded-md mb-4 text-sm">
+                          {getFilterDescription().map((filter, index) => (
+                            <div key={index} className="mb-1 last:mb-0">
+                              {filter}
+                            </div>
+                          ))}
+                        </div>
+
+                        <p className="text-muted-foreground mb-4">
+                          Essayez d'élargir vos critères de recherche pour obtenir plus de résultats.
+                        </p>
+
                         <Button
                           variant="outline"
                           onClick={() => (window.location.href = "/")}
                           className="flex items-center gap-2"
                         >
-                          <DatabaseIcon className="h-4 w-4" />
+                          <FilterX className="h-4 w-4" />
                           Réinitialiser les filtres
                         </Button>
-                      ) : (
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-muted-foreground mb-4">
+                          Aucune donnée n'est disponible. Commencez par charger des données.
+                        </p>
+
                         <Button
                           variant="outline"
                           className="flex items-center gap-2"
@@ -115,8 +172,8 @@ export function DataTable() {
                           <Database className="h-4 w-4" />
                           Charger les données
                         </Button>
-                      )}
-                    </div>
+                      </>
+                    )}
                   </div>
                 </TableCell>
               </TableRow>
