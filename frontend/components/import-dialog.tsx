@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef } from "react"
+import { useState, useRef, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
@@ -11,9 +11,11 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { Upload, FileText, CheckCircle, AlertCircle, FileUp, Database } from "lucide-react"
-import { importData } from "@/lib/import"
+import { Upload, FileText, CheckCircle, AlertCircle, FileUp, Database, Loader2 } from "lucide-react"
+import io from "socket.io-client"
 
+// Configure this to match your backend URL
+const BACKEND_URL = "http://localhost:5000"
 
 export function ImportDialog() {
   const [dataFiles, setDataFiles] = useState([])
@@ -22,17 +24,57 @@ export function ImportDialog() {
   const [result, setResult] = useState(null)
   const [dragActive, setDragActive] = useState({ data: false, mapping: false })
   const [open, setOpen] = useState(false)
+  const [progress, setProgress] = useState(0)
+  const [currentFile, setCurrentFile] = useState("")
+  const [socket, setSocket] = useState(null)
+  const [debugInfo, setDebugInfo] = useState(null)
 
   const dataInputRef = useRef(null)
   const mappingInputRef = useRef(null)
 
+  // Initialize socket connection
+  useEffect(() => {
+    if (open) {
+      const newSocket = io(BACKEND_URL)
+
+      newSocket.on("load_progress", (data) => {
+        console.log("Progress update:", data)
+        setProgress(data.progress)
+        if (data.file) {
+          setCurrentFile(data.file)
+        }
+      })
+
+      newSocket.on("connect", () => {
+        console.log("Socket connected")
+      })
+
+      newSocket.on("connect_error", (err) => {
+        console.error("Socket connection error:", err)
+        setDebugInfo((prev) => ({
+          ...prev,
+          socketError: `Connection error: ${err.message}`,
+        }))
+      })
+
+      setSocket(newSocket)
+
+      return () => {
+        console.log("Disconnecting socket")
+        newSocket.disconnect()
+      }
+    }
+  }, [open])
+
   const handleDataFilesChange = (e) => {
     const files = Array.from(e.target.files)
+    console.log("Selected data files:", files)
     setDataFiles(files)
   }
 
   const handleMappingFileChange = (e) => {
     const file = e.target.files[0]
+    console.log("Selected mapping file:", file)
     setMappingFile(file)
   }
 
@@ -54,9 +96,17 @@ export function ImportDialog() {
 
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       if (type === "data") {
-        setDataFiles(Array.from(e.dataTransfer.files))
+        // Filter to only accept .txt files
+        const txtFiles = Array.from(e.dataTransfer.files).filter((file) => file.name.toLowerCase().endsWith(".txt"))
+        console.log("Dropped data files:", txtFiles)
+        setDataFiles(txtFiles)
       } else if (type === "mapping") {
-        setMappingFile(e.dataTransfer.files[0])
+        // Only accept .csv files for mapping
+        const file = e.dataTransfer.files[0]
+        if (file.name.toLowerCase().endsWith(".csv")) {
+          console.log("Dropped mapping file:", file)
+          setMappingFile(file)
+        }
       }
     }
   }
@@ -72,43 +122,81 @@ export function ImportDialog() {
 
     setIsLoading(true)
     setResult(null)
+    setProgress(0)
+    setCurrentFile("")
+    setDebugInfo(null)
 
     try {
       const formData = new FormData()
 
-      dataFiles.forEach((file, index) => {
-        formData.append(`dataFiles`, file)
+      dataFiles.forEach((file) => {
+        formData.append("dataFiles", file)
       })
 
       formData.append("mappingFile", mappingFile)
 
-      // Appel à la fonction d'importation simulée
-      const response = await importData(formData)
-
-      setResult({
-        success: true,
-        message: `Importation réussie: ${response.rowsImported} lignes importées (simulation)`,
+      console.log("Sending files to backend:", {
+        dataFiles: dataFiles.map((f) => f.name),
+        mappingFile: mappingFile.name,
       })
 
-      // Réinitialiser les fichiers après une importation réussie
-      if (response.success) {
+      // Call the Python backend API
+      const response = await fetch(`${BACKEND_URL}/api/process_files`, {
+        method: "POST",
+        body: formData,
+      })
+
+      const responseText = await response.text()
+      console.log("Raw response:", responseText)
+
+      let data
+      try {
+        data = JSON.parse(responseText)
+      } catch (e) {
+        throw new Error(`Invalid JSON response: ${responseText}`)
+      }
+
+      console.log("Parsed response:", data)
+
+      if (!response.ok) {
+        throw new Error(data.error || "Erreur lors de l'importation")
+      }
+
+      setDebugInfo({
+        responseStatus: response.status,
+        responseData: data,
+      })
+
+      setResult({
+        success: data.success,
+        message: `Importation terminée: ${data.filesProcessed}/${data.totalFiles} fichiers traités avec succès`,
+        details: data.details,
+      })
+
+      // Reset files after successful import
+      if (data.success) {
         setTimeout(() => {
-          setDataFiles([])
-          setMappingFile(null)
-          // Fermer le dialogue après 2 secondes pour montrer le message de succès
+          // Don't close the dialog immediately to show the success message
           setTimeout(() => {
             setOpen(false)
-            setResult(null)
-          }, 2000)
-        }, 500)
+            resetForm()
+          }, 3000)
+        }, 1000)
       }
     } catch (error) {
+      console.error("Import error:", error)
       setResult({
         success: false,
         message: `Erreur lors de l'importation: ${error.message}`,
       })
+      setDebugInfo((prev) => ({
+        ...prev,
+        error: error.toString(),
+        stack: error.stack,
+      }))
     } finally {
       setIsLoading(false)
+      setProgress(100) // Ensure progress bar shows complete
     }
   }
 
@@ -116,6 +204,9 @@ export function ImportDialog() {
     setDataFiles([])
     setMappingFile(null)
     setResult(null)
+    setProgress(0)
+    setCurrentFile("")
+    setDebugInfo(null)
   }
 
   return (
@@ -238,24 +329,69 @@ export function ImportDialog() {
             )}
           </div>
 
+          {isLoading && (
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span>Traitement en cours...</span>
+                <span>{progress}%</span>
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-2.5 dark:bg-gray-700">
+                <div
+                  className="bg-primary h-2.5 rounded-full transition-all duration-300"
+                  style={{ width: `${progress}%` }}
+                ></div>
+              </div>
+              {currentFile && <p className="text-xs text-muted-foreground">Fichier en cours: {currentFile}</p>}
+            </div>
+          )}
+
           {result && (
             <Alert variant={result.success ? "default" : "destructive"}>
               {result.success ? <CheckCircle className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
               <AlertTitle>{result.success ? "Succès" : "Erreur"}</AlertTitle>
               <AlertDescription>{result.message}</AlertDescription>
+
+              {result.details && result.details.length > 0 && (
+                <div className="mt-2 text-xs max-h-32 overflow-y-auto">
+                  <p className="font-semibold">Détails:</p>
+                  <ul className="list-disc pl-5">
+                    {result.details.map((detail, index) => (
+                      <li key={index} className={detail.success ? "text-green-600" : "text-red-600"}>
+                        {detail.filename}: {detail.success ? "Succès" : `Échec - ${detail.error || "Erreur inconnue"}`}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </Alert>
+          )}
+
+          {debugInfo && (
+            <div className="mt-4 p-2 bg-gray-100 rounded text-xs font-mono overflow-x-auto">
+              <details>
+                <summary className="cursor-pointer font-semibold">Informations de débogage</summary>
+                <pre className="mt-2 whitespace-pre-wrap">{JSON.stringify(debugInfo, null, 2)}</pre>
+              </details>
+            </div>
           )}
 
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => setOpen(false)}>
               Annuler
             </Button>
-            <Button onClick={handleImport} disabled={isLoading || dataFiles.length === 0 || !mappingFile}>
+            <Button
+              onClick={handleImport}
+              disabled={isLoading || dataFiles.length === 0 || !mappingFile}
+              className="gap-2"
+            >
               {isLoading ? (
-                "Importation en cours..."
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Importation en cours...
+                </>
               ) : (
                 <>
-                  <Upload className="mr-2 h-4 w-4" />
+                  <Upload className="h-4 w-4" />
                   Importer les données
                 </>
               )}
@@ -266,4 +402,3 @@ export function ImportDialog() {
     </Dialog>
   )
 }
-
