@@ -1,36 +1,55 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Interface Web de Recherche
 
-## Getting Started
+Transforme un fichier brute txt en csv nettoyé téléchargeable. Chargement dans une base de donnée. Recherche simple, avec CSV ou avec expression régulière sur la base de donnée. 
 
-First, run the development server:
+## Première installation
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+### 1. Installez les logiciels requis
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Avant de commencer, vous devez installer deux logiciels :
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. **Docker Desktop** 
+   - Téléchargez-le ici : [Docker Desktop](https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe)
+   - Installez-le en suivant les instructions à l'écran
+   - Lancez Docker Desktop depuis votre bureau
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+2. **Node.js**
+   - Téléchargez-le ici : [Node.js](https://nodejs.org/)
+   - Choisissez la version "LTS" (bouton de gauche)
+   - Installez-le en suivant les instructions à l'écran
 
-## Learn More
+### 2. Installez l'application
 
-To learn more about Next.js, take a look at the following resources:
+1. Récupérer le code source sur [ici](https://github.com/magicAyyub/data-interface)
+2. Extrayez le fichier ZIP où vous voulez
+3. Double-cliquez sur `setup.bat`
+4. Attendez que l'installation se termine
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+> 💡 Cette installation n'est à faire qu'une seule fois !
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Utilisation quotidienne
 
-## Deploy on Vercel
+1. Lancez Docker Desktop
+2. Double-cliquez sur `start.bat`
+3. L'application s'ouvre automatiquement dans votre navigateur !
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Fonctionnalités
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### Recherche simple
+- Remplissez les champs que vous connaissez
+- Utilisez "Recherche flexible" si vous n'êtes pas sûr de l'orthographe
+- Cliquez sur "Plus de critères" pour plus d'options
+
+### Recherche par fichier CSV
+- Déposez votre fichier CSV dans la zone prévue
+- Les résultats se téléchargent automatiquement
+
+### Recherche avancée (Regex)
+Pour rechercher des emails avec des critères spécifiques
+
+## Besoin d'aide ?
+
+Si l'application ne démarre pas :
+1. Vérifiez que Docker Desktop est bien lancé (icône dans la barre des tâches)
+2. Fermez tout et réessayez avec `start.bat`
+3. Si le problème persiste, contactez [magicAyyub](https://github.com/magicAyyub)

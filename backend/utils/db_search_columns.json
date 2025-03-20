@@ -1,0 +1,8 @@
+{
+    "nom": "FIRST_NAME",
+    "prenom": "LAST_NAME",
+    "email": "EMAIL",
+    "dateNaissance": "BIRTH_DATE",
+    "idccu": "ID_CCU",
+    "iduuid": "UUID"
+}
