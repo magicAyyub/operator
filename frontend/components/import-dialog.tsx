@@ -11,7 +11,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { Upload, FileText, CheckCircle, AlertCircle, FileUp, Database, Loader2 } from "lucide-react"
+import { FileText, CheckCircle, AlertCircle, FileUp, Database, Loader2, Settings, Cog, Server } from "lucide-react"
 import io from "socket.io-client"
 
 // Configure this to match your backend URL
@@ -21,13 +21,18 @@ export function ImportDialog() {
   const [dataFiles, setDataFiles] = useState([])
   const [mappingFile, setMappingFile] = useState(null)
   const [isLoading, setIsLoading] = useState(false)
+  const [isLoadingToDb, setIsLoadingToDb] = useState(false)
   const [result, setResult] = useState(null)
+  const [dbResult, setDbResult] = useState(null)
   const [dragActive, setDragActive] = useState({ data: false, mapping: false })
   const [open, setOpen] = useState(false)
-  const [progress, setProgress] = useState(0)
+  const [currentStatus, setCurrentStatus] = useState("")
   const [currentFile, setCurrentFile] = useState("")
   const [socket, setSocket] = useState(null)
   const [debugInfo, setDebugInfo] = useState(null)
+  const [processedFiles, setProcessedFiles] = useState([])
+  const [loadProgress, setLoadProgress] = useState(0)
+  const [loadMessage, setLoadMessage] = useState("")
 
   const dataInputRef = useRef(null)
   const mappingInputRef = useRef(null)
@@ -37,11 +42,14 @@ export function ImportDialog() {
     if (open) {
       const newSocket = io(BACKEND_URL)
 
-      newSocket.on("load_progress", (data) => {
-        console.log("Progress update:", data)
-        setProgress(data.progress)
+      newSocket.on("processing_status", (data) => {
+        console.log("Status update:", data)
+        setCurrentStatus(data.status || "")
         if (data.file) {
           setCurrentFile(data.file)
+        }
+        if (data.fileIndex && data.totalFiles) {
+          setCurrentFile(`${data.fileIndex}/${data.totalFiles} - ${data.file || ""}`)
         }
       })
 
@@ -55,6 +63,16 @@ export function ImportDialog() {
           ...prev,
           socketError: `Connection error: ${err.message}`,
         }))
+      })
+
+      newSocket.on("load_progress", (data) => {
+        console.log("Load progress:", data)
+        if (data.progress !== undefined) {
+          setLoadProgress(data.progress)
+        }
+        if (data.message) {
+          setLoadMessage(data.message)
+        }
       })
 
       setSocket(newSocket)
@@ -122,9 +140,11 @@ export function ImportDialog() {
 
     setIsLoading(true)
     setResult(null)
-    setProgress(0)
+    setDbResult(null)
+    setCurrentStatus("Initialisation...")
     setCurrentFile("")
     setDebugInfo(null)
+    setProcessedFiles([])
 
     try {
       const formData = new FormData()
@@ -167,22 +187,16 @@ export function ImportDialog() {
         responseData: data,
       })
 
+      // Extract processed file paths from the response
+      const successfulFiles = data.details.filter((detail) => detail.success).map((detail) => detail.output_file)
+
+      setProcessedFiles(successfulFiles)
+
       setResult({
         success: data.success,
         message: `Importation terminée: ${data.filesProcessed}/${data.totalFiles} fichiers traités avec succès`,
         details: data.details,
       })
-
-      // Reset files after successful import
-      if (data.success) {
-        setTimeout(() => {
-          // Don't close the dialog immediately to show the success message
-          setTimeout(() => {
-            setOpen(false)
-            resetForm()
-          }, 3000)
-        }, 1000)
-      }
     } catch (error) {
       console.error("Import error:", error)
       setResult({
@@ -196,7 +210,62 @@ export function ImportDialog() {
       }))
     } finally {
       setIsLoading(false)
-      setProgress(100) // Ensure progress bar shows complete
+      setCurrentStatus("Terminé")
+    }
+  }
+
+  const handleLoadToDatabase = async () => {
+    if (processedFiles.length === 0) {
+      setDbResult({
+        success: false,
+        message: "Aucun fichier traité à charger dans la base de données",
+      })
+      return
+    }
+
+    setIsLoadingToDb(true)
+    setDbResult(null)
+    setLoadProgress(0)
+    setLoadMessage("Initialisation du chargement...")
+
+    try {
+      // Create form data for the database load request
+      const formData = new FormData()
+      formData.append("table_name", "phone_data") // You can make this configurable if needed
+
+      // Call the backend API to load data to database
+      const response = await fetch(`${BACKEND_URL}/api/load_data`, {
+        method: "POST",
+        body: formData,
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || "Erreur lors du chargement dans la base de données")
+      }
+
+      setDbResult({
+        success: true,
+        message: `Données chargées avec succès dans la base de données: ${data.total_rows || 0} enregistrements insérés`,
+        details: data,
+      })
+
+      // Close dialog after successful database load with a delay
+      if (data.success) {
+        setTimeout(() => {
+          setOpen(false)
+          resetForm()
+        }, 3000)
+      }
+    } catch (error) {
+      console.error("Database load error:", error)
+      setDbResult({
+        success: false,
+        message: `Erreur lors du chargement dans la base de données: ${error.message}`,
+      })
+    } finally {
+      setIsLoadingToDb(false)
     }
   }
 
@@ -204,9 +273,13 @@ export function ImportDialog() {
     setDataFiles([])
     setMappingFile(null)
     setResult(null)
-    setProgress(0)
+    setDbResult(null)
+    setCurrentStatus("")
     setCurrentFile("")
     setDebugInfo(null)
+    setProcessedFiles([])
+    setLoadProgress(0)
+    setLoadMessage("")
   }
 
   return (
@@ -230,118 +303,142 @@ export function ImportDialog() {
         </DialogHeader>
 
         <div className="grid gap-6 py-4">
-          <div className="grid gap-2">
-            <div
-              className={`border-2 border-dashed rounded-lg p-6 transition-colors ${
-                dragActive.data
-                  ? "border-primary bg-primary/5"
-                  : "border-muted-foreground/25 hover:border-muted-foreground/50"
-              }`}
-              onDragEnter={(e) => handleDrag(e, "data", true)}
-              onDragLeave={(e) => handleDrag(e, "data", false)}
-              onDragOver={(e) => handleDrag(e, "data", true)}
-              onDrop={(e) => handleDrop(e, "data")}
-              onClick={() => dataInputRef.current?.click()}
-            >
-              <div className="flex flex-col items-center justify-center gap-2 text-center cursor-pointer">
-                <FileUp className="h-10 w-10 text-muted-foreground" />
-                <h3 className="text-lg font-medium">Fichiers de données (TXT)</h3>
-                <p className="text-sm text-muted-foreground mb-2">
-                  Glissez-déposez vos fichiers TXT ici ou cliquez pour parcourir
-                </p>
-                <input
-                  ref={dataInputRef}
-                  id="data-files"
-                  type="file"
-                  accept=".txt"
-                  multiple
-                  onChange={handleDataFilesChange}
-                  className="hidden"
-                />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    dataInputRef.current?.click()
-                  }}
+          {!result?.success && (
+            <>
+              <div className="grid gap-2">
+                <div
+                  className={`border-2 border-dashed rounded-lg p-6 transition-colors ${
+                    dragActive.data
+                      ? "border-primary bg-primary/5"
+                      : "border-muted-foreground/25 hover:border-muted-foreground/50"
+                  }`}
+                  onDragEnter={(e) => handleDrag(e, "data", true)}
+                  onDragLeave={(e) => handleDrag(e, "data", false)}
+                  onDragOver={(e) => handleDrag(e, "data", true)}
+                  onDrop={(e) => handleDrop(e, "data")}
+                  onClick={() => dataInputRef.current?.click()}
                 >
-                  Sélectionner des fichiers
-                </Button>
-              </div>
-            </div>
+                  <div className="flex flex-col items-center justify-center gap-2 text-center cursor-pointer">
+                    <FileUp className="h-10 w-10 text-muted-foreground" />
+                    <h3 className="text-lg font-medium">Fichiers de données (TXT)</h3>
+                    <p className="text-sm text-muted-foreground mb-2">
+                      Glissez-déposez vos fichiers TXT ici ou cliquez pour parcourir
+                    </p>
+                    <input
+                      ref={dataInputRef}
+                      id="data-files"
+                      type="file"
+                      accept=".txt"
+                      multiple
+                      onChange={handleDataFilesChange}
+                      className="hidden"
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        dataInputRef.current?.click()
+                      }}
+                    >
+                      Sélectionner des fichiers
+                    </Button>
+                  </div>
+                </div>
 
-            {dataFiles.length > 0 && (
-              <div className="text-sm text-muted-foreground flex items-center gap-2 p-2 bg-muted/50 rounded">
-                <FileText className="h-4 w-4" />
-                {dataFiles.length} fichier(s) sélectionné(s): {dataFiles.map((f) => f.name).join(", ")}
+                {dataFiles.length > 0 && (
+                  <div className="text-sm text-muted-foreground flex items-center gap-2 p-2 bg-muted/50 rounded">
+                    <FileText className="h-4 w-4" />
+                    {dataFiles.length} fichier(s) sélectionné(s): {dataFiles.map((f) => f.name).join(", ")}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
 
-          <div className="grid gap-2">
-            <div
-              className={`border-2 border-dashed rounded-lg p-6 transition-colors ${
-                dragActive.mapping
-                  ? "border-primary bg-primary/5"
-                  : "border-muted-foreground/25 hover:border-muted-foreground/50"
-              }`}
-              onDragEnter={(e) => handleDrag(e, "mapping", true)}
-              onDragLeave={(e) => handleDrag(e, "mapping", false)}
-              onDragOver={(e) => handleDrag(e, "mapping", true)}
-              onDrop={(e) => handleDrop(e, "mapping")}
-              onClick={() => mappingInputRef.current?.click()}
-            >
-              <div className="flex flex-col items-center justify-center gap-2 text-center cursor-pointer">
-                <FileText className="h-10 w-10 text-muted-foreground" />
-                <h3 className="text-lg font-medium">Fichier de correspondance (MAJNUM.csv)</h3>
-                <p className="text-sm text-muted-foreground mb-2">
-                  Glissez-déposez votre fichier CSV ici ou cliquez pour parcourir
-                </p>
-                <input
-                  ref={mappingInputRef}
-                  id="mapping-file"
-                  type="file"
-                  accept=".csv"
-                  onChange={handleMappingFileChange}
-                  className="hidden"
-                />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    mappingInputRef.current?.click()
-                  }}
+              <div className="grid gap-2">
+                <div
+                  className={`border-2 border-dashed rounded-lg p-6 transition-colors ${
+                    dragActive.mapping
+                      ? "border-primary bg-primary/5"
+                      : "border-muted-foreground/25 hover:border-muted-foreground/50"
+                  }`}
+                  onDragEnter={(e) => handleDrag(e, "mapping", true)}
+                  onDragLeave={(e) => handleDrag(e, "mapping", false)}
+                  onDragOver={(e) => handleDrag(e, "mapping", true)}
+                  onDrop={(e) => handleDrop(e, "mapping")}
+                  onClick={() => mappingInputRef.current?.click()}
                 >
-                  Sélectionner un fichier
-                </Button>
-              </div>
-            </div>
+                  <div className="flex flex-col items-center justify-center gap-2 text-center cursor-pointer">
+                    <FileText className="h-10 w-10 text-muted-foreground" />
+                    <h3 className="text-lg font-medium">Fichier de correspondance (MAJNUM.csv)</h3>
+                    <p className="text-sm text-muted-foreground mb-2">
+                      Glissez-déposez votre fichier CSV ici ou cliquez pour parcourir
+                    </p>
+                    <input
+                      ref={mappingInputRef}
+                      id="mapping-file"
+                      type="file"
+                      accept=".csv"
+                      onChange={handleMappingFileChange}
+                      className="hidden"
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        mappingInputRef.current?.click()
+                      }}
+                    >
+                      Sélectionner un fichier
+                    </Button>
+                  </div>
+                </div>
 
-            {mappingFile && (
-              <div className="text-sm text-muted-foreground flex items-center gap-2 p-2 bg-muted/50 rounded">
-                <FileText className="h-4 w-4" />
-                Fichier sélectionné: {mappingFile.name}
+                {mappingFile && (
+                  <div className="text-sm text-muted-foreground flex items-center gap-2 p-2 bg-muted/50 rounded">
+                    <FileText className="h-4 w-4" />
+                    Fichier sélectionné: {mappingFile.name}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            </>
+          )}
 
           {isLoading && (
-            <div className="space-y-2">
-              <div className="flex justify-between text-sm">
-                <span>Traitement en cours...</span>
-                <span>{progress}%</span>
+            <div className="p-6 bg-muted/30 rounded-md flex flex-col items-center justify-center text-center">
+              <div className="relative mb-4">
+                <Cog className="h-8 w-8 text-primary animate-spin" />
+                <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
+                  <div className="h-2 w-2 bg-primary rounded-full"></div>
+                </div>
               </div>
-              <div className="w-full bg-gray-200 rounded-full h-2.5 dark:bg-gray-700">
+              <p className="font-medium text-lg mb-1">Traitement en cours</p>
+              <p className="text-sm text-muted-foreground">
+                {currentFile ? `Fichier ${currentFile}` : "Veuillez patienter..."}
+              </p>
+            </div>
+          )}
+
+          {isLoadingToDb && (
+            <div className="p-6 bg-muted/30 rounded-md flex flex-col items-center justify-center text-center">
+              <div className="relative mb-4">
+                <Server className="h-8 w-8 text-primary animate-pulse" />
+              </div>
+              <p className="font-medium text-lg mb-1">Chargement dans la base de données</p>
+              <p className="text-sm text-muted-foreground mb-2">
+                {loadMessage || "Veuillez patienter pendant le chargement des données..."}
+              </p>
+
+              {/* Progress bar */}
+              <div className="w-full bg-gray-200 rounded-full h-2.5 dark:bg-gray-700 mb-1">
                 <div
                   className="bg-primary h-2.5 rounded-full transition-all duration-300"
-                  style={{ width: `${progress}%` }}
+                  style={{ width: `${loadProgress}%` }}
                 ></div>
               </div>
-              {currentFile && <p className="text-xs text-muted-foreground">Fichier en cours: {currentFile}</p>}
+              <p className="text-xs text-muted-foreground">{loadProgress}%</p>
             </div>
           )}
 
@@ -366,6 +463,14 @@ export function ImportDialog() {
             </Alert>
           )}
 
+          {dbResult && (
+            <Alert variant={dbResult.success ? "default" : "destructive"} className="mt-4">
+              {dbResult.success ? <CheckCircle className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+              <AlertTitle>{dbResult.success ? "Base de données mise à jour" : "Erreur"}</AlertTitle>
+              <AlertDescription>{dbResult.message}</AlertDescription>
+            </Alert>
+          )}
+
           {debugInfo && (
             <div className="mt-4 p-2 bg-gray-100 rounded text-xs font-mono overflow-x-auto">
               <details>
@@ -376,26 +481,54 @@ export function ImportDialog() {
           )}
 
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setOpen(false)}>
-              Annuler
-            </Button>
-            <Button
-              onClick={handleImport}
-              disabled={isLoading || dataFiles.length === 0 || !mappingFile}
-              className="gap-2"
-            >
-              {isLoading ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Importation en cours...
-                </>
-              ) : (
-                <>
-                  <Upload className="h-4 w-4" />
-                  Importer les données
-                </>
-              )}
-            </Button>
+            {!result?.success ? (
+              <>
+                <Button variant="outline" onClick={() => setOpen(false)}>
+                  Annuler
+                </Button>
+                <Button
+                  onClick={handleImport}
+                  disabled={isLoading || dataFiles.length === 0 || !mappingFile}
+                  className="gap-2"
+                >
+                  {isLoading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Extraction en cours...
+                    </>
+                  ) : (
+                    <>
+                      <Settings className="h-4 w-4" />
+                      Extraire les données
+                    </>
+                  )}
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button variant="outline" onClick={() => setOpen(false)}>
+                  Fermer
+                </Button>
+                <Button
+                  onClick={handleLoadToDatabase}
+                  disabled={isLoadingToDb || processedFiles.length === 0}
+                  className="gap-2"
+                  variant="default"
+                >
+                  {isLoadingToDb ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Chargement...
+                    </>
+                  ) : (
+                    <>
+                      <Server className="h-4 w-4" />
+                      Charger dans la base de données
+                    </>
+                  )}
+                </Button>
+              </>
+            )}
           </div>
         </div>
       </DialogContent>

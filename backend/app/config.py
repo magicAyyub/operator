@@ -14,3 +14,4 @@ class Config:
     C_EXECUTABLE_PATH = BASE_ROOT / "utils/data_processor.exe"
     DETECTOR_FIRST_INPUT = BASE_ROOT / "app/utils/tmp/sample.csv"
     DETECTOR_SECOND_OUTPUT = BASE_ROOT / "app/utils/tmp/MAJNUM.csv"
+    PROCESSED_CSV = 'combined_output.csv'
