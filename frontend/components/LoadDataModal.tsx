@@ -1,9 +1,8 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Database, Loader, CheckCircle, AlertCircle } from 'lucide-react';
 import ProgressIndicator from './ProgressIndicator';
-import io from 'socket.io-client';
 
 const Modal = ({ isOpen, onClose, children, title }) => {
   if (!isOpen) return null;
@@ -29,17 +28,6 @@ const LoadDataModal = ({ isOpen, onClose }) => {
   const [error, setError] = useState('');
   const [errorDetails, setErrorDetails] = useState('');
   const [progress, setProgress] = useState(0);
-
-  useEffect(() => {
-    const socket = io('http://localhost:5000');
-    socket.on('load_progress', (data) => {
-      setProgress(data.progress);
-    });
-
-    return () => {
-      socket.disconnect();
-    };
-  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();

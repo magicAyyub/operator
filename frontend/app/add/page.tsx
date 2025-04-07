@@ -1,10 +1,9 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Upload, ArrowLeft, AlertTriangle } from 'lucide-react';
 import LoadDataModal from '@/components/LoadDataModal';
 import ProgressIndicator from '@/components/ProgressIndicator';
-import io from 'socket.io-client';
 
 const AddPage = () => {
   const [isLoading, setIsLoading] = useState(false);
@@ -16,19 +15,8 @@ const AddPage = () => {
   const [progress, setProgress] = useState(0);
   const [stage, setStage] = useState('');
 
-  const URL = 'http://localhost:5000'
+  const URL = 'http://localhost:8000'
 
-  useEffect(() => {
-    const socket = io(URL);
-    socket.on('load_progress', (data) => {
-      setProgress(data.progress);
-      setStage(`Chargement des données: ${data.progress}%`);
-    });
-
-    return () => {
-      socket.disconnect();
-    };
-  }, []);
 
   const handleDrag = (e) => {
     e.preventDefault();

@@ -1,26 +1,6 @@
 services:
-  backend:
-    build:
-      context: .
-      dockerfile: ./docker/Dockerfile
+  app:
+    build: .
+    command: poetry run startapp
     ports:
-      - "5005:5005"
-    volumes:
-      - ./data:/data           # Volume pour DuckDB/CSV
-      - ./app:/app/app         # Montage du code existant
-      - ./utils:/app/utils     # Exécutable C
-    environment:
-      REDIS_URL: "redis://redis:6379/0"
-    depends_on:
-      - redis
-
-  redis:
-    image: redislabs/redismod:latest
-    platform: linux/arm64/v8  # ou linux/arm/v7 selon votre CPU
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-
-volumes:
-  redis_data:
+      - "8000:8000"

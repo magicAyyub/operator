@@ -12,7 +12,6 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { FileText, CheckCircle, AlertCircle, FileUp, Database, Loader2, Settings, Cog, Server } from "lucide-react"
-import io from "socket.io-client"
 
 // Configure this to match your backend URL
 const BACKEND_URL = "http://localhost:5000"
@@ -26,9 +25,7 @@ export function ImportDialog() {
   const [dbResult, setDbResult] = useState(null)
   const [dragActive, setDragActive] = useState({ data: false, mapping: false })
   const [open, setOpen] = useState(false)
-  const [currentStatus, setCurrentStatus] = useState("")
   const [currentFile, setCurrentFile] = useState("")
-  const [socket, setSocket] = useState(null)
   const [debugInfo, setDebugInfo] = useState(null)
   const [processedFiles, setProcessedFiles] = useState([])
   const [loadProgress, setLoadProgress] = useState(0)
@@ -37,52 +34,6 @@ export function ImportDialog() {
   const dataInputRef = useRef(null)
   const mappingInputRef = useRef(null)
 
-  // Initialize socket connection
-  useEffect(() => {
-    if (open) {
-      const newSocket = io(BACKEND_URL)
-
-      newSocket.on("processing_status", (data) => {
-        console.log("Status update:", data)
-        setCurrentStatus(data.status || "")
-        if (data.file) {
-          setCurrentFile(data.file)
-        }
-        if (data.fileIndex && data.totalFiles) {
-          setCurrentFile(`${data.fileIndex}/${data.totalFiles} - ${data.file || ""}`)
-        }
-      })
-
-      newSocket.on("connect", () => {
-        console.log("Socket connected")
-      })
-
-      newSocket.on("connect_error", (err) => {
-        console.error("Socket connection error:", err)
-        setDebugInfo((prev) => ({
-          ...prev,
-          socketError: `Connection error: ${err.message}`,
-        }))
-      })
-
-      newSocket.on("load_progress", (data) => {
-        console.log("Load progress:", data)
-        if (data.progress !== undefined) {
-          setLoadProgress(data.progress)
-        }
-        if (data.message) {
-          setLoadMessage(data.message)
-        }
-      })
-
-      setSocket(newSocket)
-
-      return () => {
-        console.log("Disconnecting socket")
-        newSocket.disconnect()
-      }
-    }
-  }, [open])
 
   const handleDataFilesChange = (e) => {
     const files = Array.from(e.target.files)
@@ -141,7 +92,6 @@ export function ImportDialog() {
     setIsLoading(true)
     setResult(null)
     setDbResult(null)
-    setCurrentStatus("Initialisation...")
     setCurrentFile("")
     setDebugInfo(null)
     setProcessedFiles([])
@@ -210,7 +160,6 @@ export function ImportDialog() {
       }))
     } finally {
       setIsLoading(false)
-      setCurrentStatus("Terminé")
     }
   }
 
@@ -274,7 +223,6 @@ export function ImportDialog() {
     setMappingFile(null)
     setResult(null)
     setDbResult(null)
-    setCurrentStatus("")
     setCurrentFile("")
     setDebugInfo(null)
     setProcessedFiles([])

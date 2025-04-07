@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+*.so
+
+*data/
+
+# Poetry
+.venv/
+dist/
+*.egg-info/
+poetry.lock
+
+# FastAPI
+.env
+
+# IDEs and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Test coverage
+.coverage
+htmlcov/
+
+# Build
+build/
+
+# Docker (ignorer seulement les fichiers spécifiques à l'environnement local)
+.dockerignore
+
+# Backend
+mongo_data/

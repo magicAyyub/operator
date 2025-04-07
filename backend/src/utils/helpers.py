@@ -1,126 +1,11 @@
-import json
-import pandas as pd
-from pathlib import Path
 import datetime
-import chardet
-import duckdb
-import redis
-
-from functools import lru_cache
+import pandas as pd
 import traceback
 import logging
+import chardet
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
-
-
-def detect_encoding(file_path):
-    with open(file_path, 'rb') as file:
-        raw_data = file.read()
-    return chardet.detect(raw_data)['encoding']
-
-def clean_datetime(value):
-    """
-    Nettoie et valide les valeurs de date.
-    Gère les cas spéciaux comme les dates avec mois ou jours à 0.
-    """
-    if pd.isna(value) or value is None:
-        return None
-        
-    try:
-        # Si c'est déjà un objet datetime ou Timestamp
-        if isinstance(value, (pd.Timestamp, datetime.datetime)):
-            if value.year < 1900:  # Gérer les dates trop anciennes
-                return None
-            return value.strftime('%Y-%m-%d %H:%M:%S')
-            
-        # Si c'est une chaîne de caractères
-        elif isinstance(value, str):
-            # Retirer le timezone s'il est présent
-            if '+' in value:
-                value = value.split('+')[0].strip()
-            elif '-' in value and value.count('-') > 2:
-                value = value.rsplit('-', 1)[0].strip()
-            
-            # Gérer les cas où le mois ou le jour sont à 0
-            if '-00-' in value or value.endswith('-00'):
-                parts = value.split('-')
-                year = parts[0]
-                month = '01' if parts[1] == '00' else parts[1]
-                day = '01' if len(parts) > 2 and parts[2] == '00' else parts[2]
-                value = f"{year}-{month}-{day}"
-                
-            # Vérifier si la date est valide
-            try:
-                parsed_date = pd.to_datetime(value)
-                if parsed_date.year < 1900:  # Gérer les dates trop anciennes
-                    return None
-                return parsed_date.strftime('%Y-%m-%d %H:%M:%S')
-            except:
-                return None
-                
-        return None
-    except:
-        return None
-    
-
-def get_duckdb():
-    return duckdb.connect('/data/analytics.db')
-
-def get_redis():
-    return redis.Redis(host='redis', port=6379)
-
-def cached_query(key, sql, ttl=60):
-    """Nouvelle fonction à utiliser dans vos routes existantes"""
-    r = get_redis()
-    
-    if cached := r.get(key):
-        return json.loads(cached)
-    
-    con = get_duckdb()
-    result = con.execute(sql).fetchall()
-    r.setex(key, ttl, json.dumps(result))
-    return result
-
-def refresh_duckdb():
-    con = duckdb.connect('/data/analytics.db')
-    csv_path = '/data/input.csv'
-    
-    # Vérifier si le CSV existe
-    if not Path(csv_path).exists():
-        raise FileNotFoundError("Aucun fichier CSV détecté")
-    
-    # Vérifier si la table existe
-    tables = con.execute("SHOW TABLES").fetchall()
-    table_exists = 'data' in [t[0] for t in tables]
-    
-    # Logique de mise à jour
-    if table_exists:
-        # Mise à jour incrémentale (optionnel)
-        con.execute(f"""
-            CREATE TEMP TABLE new_data AS 
-            SELECT * FROM read_csv_auto('{csv_path}')
-        """)
-        
-        # Suppression des doublons (exemple)
-        con.execute("""
-            DELETE FROM data WHERE id IN (
-                SELECT id FROM new_data
-            )
-        """)
-        
-        con.execute("INSERT INTO data SELECT * FROM new_data")
-    else:
-        # Création initiale
-        con.execute(f"""
-            CREATE TABLE data AS 
-            SELECT * FROM read_csv_auto('{csv_path}')
-        """)
-    
-    # Optimisation des performances
-    con.execute("VACUUM data")
-    con.execute("CHECKPOINT")
-
 
 def join_operator_data(output_path, mapping_path):
     """
@@ -237,3 +122,52 @@ def join_operator_data(output_path, mapping_path):
         logger.error(f"Error joining operator data: {str(e)}")
         logger.error(traceback.format_exc())
         return None
+
+def clean_datetime(value):
+    """
+    Nettoie et valide les valeurs de date.
+    Gère les cas spéciaux comme les dates avec mois ou jours à 0.
+    """
+    if pd.isna(value) or value is None:
+        return None
+        
+    try:
+        # Si c'est déjà un objet datetime ou Timestamp
+        if isinstance(value, (pd.Timestamp, datetime.datetime)):
+            if value.year < 1900:  # Gérer les dates trop anciennes
+                return None
+            return value.strftime('%Y-%m-%d %H:%M:%S')
+            
+        # Si c'est une chaîne de caractères
+        elif isinstance(value, str):
+            # Retirer le timezone s'il est présent
+            if '+' in value:
+                value = value.split('+')[0].strip()
+            elif '-' in value and value.count('-') > 2:
+                value = value.rsplit('-', 1)[0].strip()
+            
+            # Gérer les cas où le mois ou le jour sont à 0
+            if '-00-' in value or value.endswith('-00'):
+                parts = value.split('-')
+                year = parts[0]
+                month = '01' if parts[1] == '00' else parts[1]
+                day = '01' if len(parts) > 2 and parts[2] == '00' else parts[2]
+                value = f"{year}-{month}-{day}"
+                
+            # Vérifier si la date est valide
+            try:
+                parsed_date = pd.to_datetime(value)
+                if parsed_date.year < 1900:  # Gérer les dates trop anciennes
+                    return None
+                return parsed_date.strftime('%Y-%m-%d %H:%M:%S')
+            except:
+                return None
+                
+        return None
+    except:
+        return None
+
+def detect_encoding(file_path):
+    with open(file_path, 'rb') as file:
+        raw_data = file.read()
+    return chardet.detect(raw_data)['encoding']
