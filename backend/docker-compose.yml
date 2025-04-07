@@ -1,16 +1,26 @@
-version: '3.8'
 services:
- db:
-   image: mysql:8.0
-   environment:
-     MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-     MYSQL_DATABASE: ${MYSQL_DATABASE}
-     MYSQL_USER: ${MYSQL_USER}
-     MYSQL_PASSWORD: ${MYSQL_PASSWORD}
-   ports:
-     - "3306:3306"
-   volumes:
-     - mysql_data:/var/lib/mysql
+  backend:
+    build:
+      context: .
+      dockerfile: ./docker/Dockerfile
+    ports:
+      - "5005:5005"
+    volumes:
+      - ./data:/data           # Volume pour DuckDB/CSV
+      - ./app:/app/app         # Montage du code existant
+      - ./utils:/app/utils     # Exécutable C
+    environment:
+      REDIS_URL: "redis://redis:6379/0"
+    depends_on:
+      - redis
+
+  redis:
+    image: redislabs/redismod:latest
+    platform: linux/arm64/v8  # ou linux/arm/v7 selon votre CPU
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
 volumes:
- mysql_data:
-   driver: local
+  redis_data:

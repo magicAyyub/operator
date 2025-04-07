@@ -1,20 +1,18 @@
+import json
 import pandas as pd
+from pathlib import Path
 import datetime
-import math
 import chardet
+import duckdb
+import redis
 
-def clean_sql_results(results):
-    cleaned = []
-    for row in results:
-        clean_row = {}
-        for key, value in row.items():
-            if hasattr(value, 'item'):
-                value = value.item()
-            if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
-                value = None
-            clean_row[key] = value
-        cleaned.append(clean_row)
-    return cleaned
+from functools import lru_cache
+import traceback
+import logging
+# Set up logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+
 
 def detect_encoding(file_path):
     with open(file_path, 'rb') as file:
@@ -63,4 +61,179 @@ def clean_datetime(value):
                 
         return None
     except:
+        return None
+    
+
+def get_duckdb():
+    return duckdb.connect('/data/analytics.db')
+
+def get_redis():
+    return redis.Redis(host='redis', port=6379)
+
+def cached_query(key, sql, ttl=60):
+    """Nouvelle fonction à utiliser dans vos routes existantes"""
+    r = get_redis()
+    
+    if cached := r.get(key):
+        return json.loads(cached)
+    
+    con = get_duckdb()
+    result = con.execute(sql).fetchall()
+    r.setex(key, ttl, json.dumps(result))
+    return result
+
+def refresh_duckdb():
+    con = duckdb.connect('/data/analytics.db')
+    csv_path = '/data/input.csv'
+    
+    # Vérifier si le CSV existe
+    if not Path(csv_path).exists():
+        raise FileNotFoundError("Aucun fichier CSV détecté")
+    
+    # Vérifier si la table existe
+    tables = con.execute("SHOW TABLES").fetchall()
+    table_exists = 'data' in [t[0] for t in tables]
+    
+    # Logique de mise à jour
+    if table_exists:
+        # Mise à jour incrémentale (optionnel)
+        con.execute(f"""
+            CREATE TEMP TABLE new_data AS 
+            SELECT * FROM read_csv_auto('{csv_path}')
+        """)
+        
+        # Suppression des doublons (exemple)
+        con.execute("""
+            DELETE FROM data WHERE id IN (
+                SELECT id FROM new_data
+            )
+        """)
+        
+        con.execute("INSERT INTO data SELECT * FROM new_data")
+    else:
+        # Création initiale
+        con.execute(f"""
+            CREATE TABLE data AS 
+            SELECT * FROM read_csv_auto('{csv_path}')
+        """)
+    
+    # Optimisation des performances
+    con.execute("VACUUM data")
+    con.execute("CHECKPOINT")
+
+
+def join_operator_data(output_path, mapping_path):
+    """
+    Join operator data from the mapping file to the output CSV
+    
+    Args:
+        output_path: Path to the output CSV file from the C executable
+        mapping_path: Path to the MAJNUM.csv file with operator information
+    
+    Returns:
+        Path to the processed file with operator information
+    """
+    try:
+        logger.info(f"Joining operator data to {output_path} using {mapping_path}")
+        
+        # Read the output CSV
+        df = pd.read_csv(output_path, low_memory=False)
+        
+        # Ensure TELEPHONE column exists
+        if 'TELEPHONE' not in df.columns:
+            logger.error(f"TELEPHONE column not found in {output_path}")
+            return None
+            
+        df['TELEPHONE'] = df['TELEPHONE'].astype(str)
+        df['TELEPHONE'] = df['TELEPHONE'].str.replace('+', '')
+        df['TELEPHONE'] = df['TELEPHONE'].str.replace('.0', '')
+        
+        # Read the operator data
+        operateur = pd.read_csv(
+            mapping_path,
+            encoding='ISO-8859-1',
+            sep=';'
+        )
+        
+        # Check if required columns exist in the mapping file
+        required_columns = ["Tranche_Debut", "Tranche_Fin", "Date_Attribution", "EZABPQM", "Mnémo"]
+        missing_columns = [col for col in required_columns if col not in operateur.columns]
+        if missing_columns:
+            logger.error(f"Missing columns in mapping file: {missing_columns}")
+            return None
+            
+        df_operateur_fr = operateur.drop(columns=["Tranche_Debut", "Tranche_Fin", "Date_Attribution"])
+        df_operateur_fr.rename(columns={"EZABPQM": "Prefixe"}, inplace=True)
+        df_operateur_fr.rename(columns={"Mnémo": "Operateur"}, inplace=True)
+        
+        # Create a list of phone number prefixes
+        liste_numeros_idrh = df["TELEPHONE"]
+        liste_numeros_idrh = liste_numeros_idrh.astype(str)
+        liste_numeros_idrh = [numero[:2] for numero in liste_numeros_idrh]
+        
+        # Filter French numbers (starting with "33")
+        liste_numeros_fr_idrh = [code for code in liste_numeros_idrh if code == "33"]
+        
+        # Split into French and non-French numbers
+        df_numeros_fr_idrh = df[df["TELEPHONE"].str[:2].isin(liste_numeros_fr_idrh)]
+        df_numero_etrangers = df[~df["TELEPHONE"].str[:2].isin(liste_numeros_fr_idrh)]
+        
+        # Remove the country code from French numbers
+        df_numeros_fr_idrh['TELEPHONE'] = df_numeros_fr_idrh['TELEPHONE'].str.replace(r'^33', '', regex=True)
+        
+        # Add length of phone numbers
+        df_numeros_fr_idrh["Longueur_numero_telephone"] = df_numeros_fr_idrh["TELEPHONE"].str.len()
+        df_operateur_fr['Prefixe'] = df_operateur_fr['Prefixe'].astype(str)
+        
+        # Split operators by prefix length
+        df_operateur_fr_7 = df_operateur_fr[df_operateur_fr["Prefixe"].str.len() == 7]
+        df_operateur_fr_6 = df_operateur_fr[df_operateur_fr["Prefixe"].str.len() == 6]
+        df_operateur_fr_5 = df_operateur_fr[df_operateur_fr["Prefixe"].str.len() == 5]
+        df_operateur_fr_4 = df_operateur_fr[df_operateur_fr["Prefixe"].str.len() == 4]
+        df_operateur_fr_3 = df_operateur_fr[df_operateur_fr["Prefixe"].str.len() == 3]
+        
+        # Extract prefixes of different lengths
+        df_numeros_fr_idrh['Prefixe_7'] = df_numeros_fr_idrh['TELEPHONE'].str[:7]
+        df_numeros_fr_idrh['Prefixe_6'] = df_numeros_fr_idrh['TELEPHONE'].str[:6]
+        df_numeros_fr_idrh['Prefixe_5'] = df_numeros_fr_idrh['TELEPHONE'].str[:5]
+        df_numeros_fr_idrh['Prefixe_4'] = df_numeros_fr_idrh['TELEPHONE'].str[:4]
+        df_numeros_fr_idrh['Prefixe_3'] = df_numeros_fr_idrh['TELEPHONE'].str[:3]
+        
+        # Match each prefix length
+        result_idrh_7 = df_numeros_fr_idrh.merge(df_operateur_fr_7, left_on='Prefixe_7', right_on='Prefixe', how='inner')
+        result_idrh_6 = df_numeros_fr_idrh.merge(df_operateur_fr_6, left_on='Prefixe_6', right_on='Prefixe', how='inner')
+        result_idrh_5 = df_numeros_fr_idrh.merge(df_operateur_fr_5, left_on='Prefixe_5', right_on='Prefixe', how='inner')
+        result_idrh_4 = df_numeros_fr_idrh.merge(df_operateur_fr_4, left_on='Prefixe_4', right_on='Prefixe', how='inner')
+        result_idrh_3 = df_numeros_fr_idrh.merge(df_operateur_fr_3, left_on='Prefixe_3', right_on='Prefixe', how='inner')
+        
+        # Combine all results
+        result_idrh = pd.concat([result_idrh_3, result_idrh_4, result_idrh_5], axis=0)
+        
+        # Add foreign numbers (without operator information)
+        if not df_numero_etrangers.empty:
+            # Add 'Operateur' column with 'Étranger' value for foreign numbers
+            df_numero_etrangers['Operateur'] = 'Étranger'
+            result_idrh = pd.concat([result_idrh, df_numero_etrangers], axis=0)
+        
+        # Keep only the original columns plus the Operateur column
+        original_columns = df.columns.tolist()
+        if 'Operateur' not in original_columns:
+            columns_to_keep = original_columns + ['Operateur']
+        else:
+            columns_to_keep = original_columns
+            
+        # Filter to keep only necessary columns
+        result_columns = [col for col in columns_to_keep if col in result_idrh.columns]
+        result_idrh = result_idrh[result_columns]
+        
+        # Save the result
+        processed_output_path = str(output_path).replace('.csv', '_with_operators.csv')
+        result_idrh.to_csv(processed_output_path, index=False)
+        
+        logger.info(f"Operator data joined successfully, saved to {processed_output_path}")
+        return processed_output_path
+    
+    except Exception as e:
+        logger.error(f"Error joining operator data: {str(e)}")
+        logger.error(traceback.format_exc())
         return None
