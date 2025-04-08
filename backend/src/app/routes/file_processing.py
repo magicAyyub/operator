@@ -7,198 +7,231 @@ from pathlib import Path
 import traceback
 import logging
 import pandas as pd
-from src.utils.helpers import join_operator_data
+from datetime import datetime
+import shutil
 from src.utils.settings import Config
+from src.utils.helpers import join_operator_data
 
 # Set up logging
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api", tags=["file_processing"])
+router = APIRouter(
+    prefix="/api",
+    tags=["file_processing"],
+    responses={404: {"description": "Not found"}}
+)
 
-@router.post("/process_files")
+def validate_file_extension(filename: str, allowed_extensions: set) -> bool:
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in allowed_extensions
+
+def clean_directory(directory: Path, exclude: list = None):
+    """Clean up directory except excluded files"""
+    exclude = exclude or []
+    for item in directory.iterdir():
+        if item.name not in exclude:
+            if item.is_file():
+                item.unlink()
+            else:
+                shutil.rmtree(item)
+
+async def save_upload_file(upload_file: UploadFile, destination: Path) -> bool:
+    try:
+        with destination.open("wb") as buffer:
+            shutil.copyfileobj(upload_file.file, buffer)
+        return True
+    except Exception as e:
+        logger.error(f"Error saving file {upload_file.filename}: {str(e)}")
+        return False
+
+@router.post("/process_files", response_model=dict)
 async def process_files_endpoint(
     dataFiles: List[UploadFile] = File(...),
     mappingFile: UploadFile = File(...)
 ):
-    """
-    Endpoint to process files and join operator data.
-    """
-    logger.info("Process files endpoint called")
+    """Endpoint for processing multiple data files with a mapping file"""
+    start_time = datetime.now()
+    logger.info(f"Process files endpoint called at {start_time}")
     
-    # Validate files
+    # Validate input files
+    if not dataFiles:
+        logger.error("No data files provided")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No data files provided"
+        )
+
+    # Validate file extensions
     for file in dataFiles:
-        if not file.filename.endswith('.txt'):
+        if not validate_file_extension(file.filename, {'txt'}):
             logger.error(f"Invalid file format for {file.filename}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f'Invalid file format for {file.filename}. Only .txt files are allowed.'
             )
-    
-    if not mappingFile.filename.endswith('.csv'):
+
+    if not validate_file_extension(mappingFile.filename, {'csv'}):
         logger.error(f"Invalid mapping file format: {mappingFile.filename}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail='Invalid mapping file format. Only .csv files are allowed.'
         )
-    
-    logger.info(f"Received {len(dataFiles)} data files and 1 mapping file")
-    
-    # Ensure upload directory exists
-    os.makedirs(Path(Config.UPLOAD_FOLDER), exist_ok=True)
-    
+
+    # Verify and prepare working directory
+    upload_dir = Path(Config.UPLOAD_FOLDER)
+    upload_dir.mkdir(exist_ok=True, parents=True)
+    clean_directory(upload_dir, exclude=['input.csv'])  # Keep combined output if exists
+
+    # Verify C executable
+    c_executable = Path(Config.C_EXECUTABLE_PATH)
+    if not c_executable.exists():
+        logger.error(f"C executable not found at {c_executable}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Processing service unavailable"
+        )
+
+    if not os.access(c_executable, os.X_OK):
+        logger.error(f"C executable not executable at {c_executable}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Processing service not executable"
+        )
+
     # Save mapping file
-    mapping_path = Path(Config.UPLOAD_FOLDER) / Path(mappingFile.filename).name
-    try:
-        with open(mapping_path, "wb") as f:
-            f.write(await mappingFile.read())
-        logger.info(f"Mapping file saved to {mapping_path}")
-    except Exception as e:
-        logger.error(f"Error saving mapping file: {str(e)}")
+    mapping_path = upload_dir / Path(mappingFile.filename).name
+    if not await save_upload_file(mappingFile, mapping_path):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Could not save mapping file"
         )
-    
+    logger.info(f"Mapping file saved to {mapping_path}")
+
+    # Process files
     results = []
-    total_files = len(dataFiles)
-    processed_files = 0
     combined_df = None
-    combined_output_path = Path(Config.UPLOAD_FOLDER) / 'input.csv'
-    
-    # Process each data file
+    combined_output_path = upload_dir / 'input.csv'
+
     for idx, file in enumerate(dataFiles, 1):
+        file_start = datetime.now()
+        file_result = {
+            'filename': file.filename,
+            'success': False,
+            'error': None,
+            'processing_time': None
+        }
+
         try:
-            logger.info(f"Processing file {idx}/{total_files}: {file.filename}")
+            logger.info(f"Processing file {idx}/{len(dataFiles)}: {file.filename}")
             
-            input_path = (Path(Config.UPLOAD_FOLDER) / Path(file.filename)).name
-            output_path = Path(Config.UPLOAD_FOLDER) / f'output_{Path(file.filename).name}.csv'
-            
-            # Save the data file
-            try:
-                with open(input_path, "wb") as f:
-                    f.write(await file.read())
-                logger.info(f"Data file saved to {input_path}")
-            except Exception as e:
-                logger.error(f"Error saving data file: {str(e)}")
-                results.append({
-                    'filename': file.filename,
-                    'success': False,
-                    'error': "Could not save file"
-                })
+            # Save input file
+            input_path = upload_dir / Path(file.filename).name
+            if not await save_upload_file(file, input_path):
+                file_result['error'] = "Could not save input file"
+                results.append(file_result)
                 continue
-            
-            # Run the C executable
-            cmd = [
-                str(Path(Config.C_EXECUTABLE_PATH)), 
-                str(input_path), 
-                str(output_path)
-            ]
-            logger.info(f"Running command: {' '.join(cmd)}")
-            
+
+            # Prepare output path
+            output_path = upload_dir / f'output_{Path(file.filename).stem}.csv'
+
+            # Execute processing
+            cmd = [str(c_executable), str(input_path), str(output_path)]
+            logger.info(f"Executing: {' '.join(cmd)}")
+
             try:
                 process = subprocess.run(
                     cmd,
                     capture_output=True,
-                    text=True
+                    text=True,
+                    timeout=60
                 )
-                
-                logger.info(f"Process return code: {process.returncode}")
+
+                # Log process output
                 if process.stdout:
-                    logger.info(f"Process stdout: {process.stdout}")
+                    logger.debug(f"STDOUT: {process.stdout[:200]}...")
                 if process.stderr:
-                    logger.error(f"Process stderr: {process.stderr}")
-                
+                    logger.warning(f"STDERR: {process.stderr[:200]}...")
+
                 if process.returncode != 0:
-                    error_msg = process.stderr or "Unknown error during file processing"
-                    logger.error(f"Processing failed for {file.filename}: {error_msg}")
-                    results.append({
-                        'filename': file.filename,
-                        'success': False,
-                        'error': error_msg
-                    })
+                    error_msg = process.stderr or "Unknown error during processing"
+                    file_result['error'] = error_msg[:200]
+                    results.append(file_result)
                     continue
-                
-                logger.info(f"Processing successful for {file.filename}")
-                
-                # Join operator data to the output file
-                processed_output_path = join_operator_data(output_path, mapping_path)
-                
-                if processed_output_path:
-                    results.append({
-                        'filename': file.filename,
-                        'success': True,
-                        'output_file': Path(processed_output_path).name
-                    })
-                    
-                    # Add to combined output
-                    file_df = pd.read_csv(processed_output_path)
+
+                # Process output with mapping
+                processed_output = join_operator_data(output_path, mapping_path)
+                if not processed_output or not Path(processed_output).exists():
+                    file_result['error'] = "Failed to join operator data"
+                    results.append(file_result)
+                    continue
+
+                # Add to combined output
+                try:
+                    file_df = pd.read_csv(processed_output)
                     if combined_df is None:
                         combined_df = file_df
                     else:
                         combined_df = pd.concat([combined_df, file_df], ignore_index=True)
                     
-                    # Clean up intermediate CSV
-                    if output_path.exists():
-                        output_path.unlink()
-                        logger.info(f"Cleaned up intermediate CSV file: {output_path}")
-                else:
-                    results.append({
-                        'filename': file.filename,
-                        'success': False,
-                        'error': "Failed to join operator data"
-                    })
-                    # Clean up intermediate CSV if joining failed
-                    if output_path.exists():
-                        output_path.unlink()
-                        logger.info(f"Cleaned up intermediate CSV file: {output_path}")
-            
+                    file_result['success'] = True
+                    file_result['output_file'] = Path(processed_output).name
+                except Exception as e:
+                    file_result['error'] = f"Data processing error: {str(e)}"
+
+            except subprocess.TimeoutExpired:
+                file_result['error'] = "Processing timed out"
+            except subprocess.CalledProcessError as e:
+                file_result['error'] = f"Processing failed: {str(e)}"
             except Exception as e:
-                logger.error(f"Error running subprocess for {file.filename}: {str(e)}")
-                results.append({
-                    'filename': file.filename,
-                    'success': False,
-                    'error': str(e)
-                })
-                continue
-            
-            # Clean up input file
+                file_result['error'] = f"Unexpected error: {str(e)}"
+
+        except Exception as e:
+            logger.error(f"Error processing {file.filename}: {str(e)}")
+            logger.error(traceback.format_exc())
+            file_result['error'] = f"Processing error: {str(e)}"
+        finally:
+            # Clean up temporary files
             if input_path.exists():
                 input_path.unlink()
-                logger.info(f"Cleaned up input file: {input_path}")
+            if output_path.exists():
+                output_path.unlink()
             
-            processed_files += 1
-        
+            file_result['processing_time'] = str(datetime.now() - file_start)
+            results.append(file_result)
+
+    # Save combined output if successful
+    if combined_df is not None and not combined_df.empty:
+        try:
+            combined_df.to_csv(combined_output_path, index=False)
+            Config.PROCESSED_CSV = 'input.csv'
+            logger.info(f"Combined output saved to {combined_output_path}")
         except Exception as e:
-            logger.error(f"Exception processing {file.filename}: {str(e)}")
-            logger.error(traceback.format_exc())
-            results.append({
-                'filename': file.filename,
-                'success': False,
-                'error': str(e)
-            })
-    
-    # Save combined output if we have processed files
-    if combined_df is not None:
-        combined_df.to_csv(combined_output_path, index=False)
-        logger.info(f"Combined output saved to {combined_output_path}")
-        Config.PROCESSED_CSV = 'input.csv'
-    
-    # Clean up mapping file after all files are processed
+            logger.error(f"Failed to save combined output: {str(e)}")
+
+    # Clean up mapping file
     if mapping_path.exists():
         mapping_path.unlink()
-        logger.info(f"Cleaned up mapping file: {mapping_path}")
-    
-    # Count successful files
-    success_count = sum(1 for result in results if result['success'])
-    logger.info(f"Processing complete. {success_count}/{total_files} files processed successfully")
-    
+
+    # Prepare response
+    success_count = sum(1 for r in results if r['success'])
+    processing_time = str(datetime.now() - start_time)
+
     response_data = {
         'success': success_count > 0,
-        'filesProcessed': success_count,
-        'totalFiles': total_files,
-        'details': results
+        'files_processed': success_count,
+        'total_files': len(dataFiles),
+        'processing_time': processing_time,
+        'details': results,
+        'combined_output': 'input.csv' if combined_df is not None else None,
+        'system_info': {
+            'executable': str(c_executable),
+            'system': os.name,
+            'platform': os.uname().sysname if hasattr(os, 'uname') else 'Windows'
+        }
     }
-    logger.info(f"Returning response: {response_data}")
-    
+
+    logger.info(f"Processing completed in {processing_time}. Success: {success_count}/{len(dataFiles)}")
     return JSONResponse(content=response_data)
