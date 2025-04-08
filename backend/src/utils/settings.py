@@ -1,15 +1,21 @@
 from pathlib import Path
+import platform
 
 class Config:
     BASE_ROOT = "src/"
     UPLOAD_FOLDER = BASE_ROOT + "data/"
     PROCESSED_CSV = "processed_data.csv"
     SOCKETIO_CORS_ALLOWED_ORIGINS = "*"
-    # if you are using windows, you can use the executable file
-    # if you are using linux, you can use the C source code
-
-    # C_EXECUTABLE_PATH = BASE_ROOT /"utils/data_processor"
-    C_EXECUTABLE_PATH = BASE_ROOT + "executables/data_processor.exe"
+    
+    # Dynamically determine the executable path based on platform
+    EXECUTABLE_DIR = BASE_ROOT + "executables/"
+    
+    # Use .exe on Windows, regular binary on Unix-like systems
+    EXECUTABLE_NAME = "data_processor.exe" if platform.system() == "Windows" else "data_processor"
+    
+    # Full path to the executable
+    C_EXECUTABLE_PATH = EXECUTABLE_DIR + EXECUTABLE_NAME
+    
     DETECTOR_FIRST_INPUT = BASE_ROOT + "app/utils/tmp/sample.csv"
     DETECTOR_SECOND_OUTPUT = BASE_ROOT + "app/utils/tmp/MAJNUM.csv"
     PROCESSED_CSV = 'combined_output.csv'
