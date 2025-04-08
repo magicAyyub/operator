@@ -239,7 +239,6 @@ async def process_files_endpoint(
             'executable': str(c_executable),
             'command_used': ' '.join(executable_cmd),
             'save_file': str(mapping_path),
-            'save_file2': str(output_path)
         }
     }
 
