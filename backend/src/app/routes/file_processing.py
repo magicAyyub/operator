@@ -32,27 +32,12 @@ def is_wsl() -> bool:
 
 def get_executable_command(executable_path: Path) -> list:
     """Get the appropriate command for the executable based on environment"""
-    # Convert to string for easier manipulation
-    exec_path_str = str(executable_path)
-    
-    # Check if we're in WSL
     if is_wsl():
-        # If we're in WSL and it's a Windows executable (.exe), we need special handling
-        if '.exe' in exec_path_str.lower():
-            # For WSL, we shouldn't call 'wsl' again (that would be recursive)
-            # Instead just use the normal path
-            return [exec_path_str]
-        else:
-            # For Linux executable in WSL, make sure it's executable
-            try:
-                # Make it executable if it's not already
-                subprocess.run(['chmod', '+x', exec_path_str], check=True)
-            except Exception as e:
-                logger.warning(f"Failed to set executable permissions: {e}")
-            return [exec_path_str]
-    else:
-        # On Windows or other non-WSL systems
-        return [exec_path_str]
+        # If running in WSL but executable is Windows binary
+        if '.exe' in executable_path.suffix.lower():
+            return ['wsl', str(executable_path)]
+        return [str(executable_path)]
+    return [str(executable_path)]
 
 async def process_single_file(
     file: UploadFile,
