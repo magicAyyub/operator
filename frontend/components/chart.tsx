@@ -4,7 +4,8 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recha
 import { AlertCircle } from "lucide-react"
 
 export function Chart({ data, color, title }) {
-  if (!data || data.length === 0) {
+  // Vérifier si les données sont valides
+  if (!data || !Array.isArray(data) || data.length === 0) {
     return (
       <div className="h-[140px] flex flex-col items-center justify-center text-center">
         <AlertCircle className="h-8 w-8 text-muted-foreground mb-1" />
@@ -17,7 +18,14 @@ export function Chart({ data, color, title }) {
     <div className="h-[140px]">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data}>
-          <XAxis dataKey="name" fontSize={12} tickLine={false} axisLine={false} />
+          <XAxis
+            dataKey="name"
+            fontSize={12}
+            tickLine={false}
+            axisLine={false}
+            tick={{ fill: "#888888" }}
+            tickFormatter={(value) => (value ? (value.length > 10 ? `${value.substring(0, 10)}...` : value) : "")}
+          />
           <YAxis hide />
           <Tooltip
             formatter={(value) => [`${value}%`, "Pourcentage"]}
@@ -34,4 +42,3 @@ export function Chart({ data, color, title }) {
     </div>
   )
 }
-

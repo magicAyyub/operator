@@ -5,10 +5,11 @@ This module contains the FastAPI application and its configuration.
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from src.app.routes import file_processing
-from src.utils.settings import ORIGINS
+from src.app.routes import csv_query
 
 
 file_processing_router = file_processing.router
+csv_query_router = csv_query.router
 
 app = FastAPI(
     title = "API operator",
@@ -27,6 +28,7 @@ app.add_middleware(
 
 # Include all routes
 app.include_router(file_processing_router)
+app.include_router(csv_query_router)
 
 
 # Root endpoint to verify API connection

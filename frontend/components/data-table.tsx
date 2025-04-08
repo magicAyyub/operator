@@ -10,7 +10,7 @@ import { Download, ChevronLeft, ChevronRight, FileSpreadsheet, AlertCircle, Data
 export function DataTable() {
   const [page, setPage] = useState(1)
   const searchParams = useSearchParams()
-  const { data, isLoading, totalPages } = useData(page)
+  const { data, isLoading, totalPages, message } = useData(page)
 
   const handleExport = async () => {
     const params = new URLSearchParams(searchParams)
@@ -19,7 +19,7 @@ export function DataTable() {
     try {
       // Pour la démonstration, ouvrir une nouvelle fenêtre avec l'URL d'exportation
       // Dans un environnement réel, cela téléchargera le fichier CSV
-      const exportUrl = `/api/export?${params.toString()}`
+      const exportUrl = `/api/csv/export?${params.toString()}`
       window.open(exportUrl, "_blank")
 
       console.log("Simulation: Exportation démarrée avec les paramètres:", params.toString())
@@ -35,7 +35,7 @@ export function DataTable() {
     try {
       // Pour la démonstration, ouvrir une nouvelle fenêtre avec l'URL d'exportation
       // Dans un environnement réel, cela téléchargera le fichier CSV
-      const exportUrl = `/api/export-in-details?${params.toString()}`
+      const exportUrl = `/api/csv/export-in-details?${params.toString()}`
       window.open(exportUrl, "_blank")
 
       console.log("Simulation: Exportation des détails IN démarrée avec les paramètres:", params.toString())
@@ -80,16 +80,29 @@ export function DataTable() {
     return filters
   }
 
+  // Vérifier si nous avons un message indiquant qu'il n'y a pas de données
+  const noData = message === "no_data"
+
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center">
         <h2 className="text-xl font-semibold">Résultats</h2>
         <div className="flex gap-2">
-          <Button onClick={handleExportInDetails} variant="outline" className="flex items-center gap-2">
+          <Button
+            onClick={handleExportInDetails}
+            variant="outline"
+            className="flex items-center gap-2"
+            disabled={noData || data.length === 0}
+          >
             <FileSpreadsheet className="h-4 w-4" />
             Exporter détails IN
           </Button>
-          <Button onClick={handleExport} variant="outline" className="flex items-center gap-2">
+          <Button
+            onClick={handleExport}
+            variant="outline"
+            className="flex items-center gap-2"
+            disabled={noData || data.length === 0}
+          >
             <Download className="h-4 w-4" />
             Exporter résumé
           </Button>
@@ -115,6 +128,33 @@ export function DataTable() {
                   <div className="flex flex-col items-center justify-center">
                     <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mb-2"></div>
                     <p className="text-sm text-muted-foreground">Chargement des données...</p>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ) : noData ? (
+              <TableRow>
+                <TableCell colSpan={6} className="h-64">
+                  <div className="flex flex-col items-center justify-center text-center p-6">
+                    <AlertCircle className="h-12 w-12 text-muted-foreground mb-4" />
+                    <h3 className="text-lg font-medium mb-2">Aucune donnée disponible</h3>
+                    <p className="text-muted-foreground mb-4">
+                      Commencez par importer les fichiers pour visualiser les données.
+                    </p>
+
+                    <Button
+                      variant="outline"
+                      className="flex items-center gap-2"
+                      onClick={() => {
+                        // Trouver et cliquer sur le bouton d'importation dans la barre d'action
+                        const importButton = document.querySelector(".action-bar-import-button")
+                        if (importButton) {
+                          ;(importButton as HTMLButtonElement).click()
+                        }
+                      }}
+                    >
+                      <Database className="h-4 w-4" />
+                      Importer des données
+                    </Button>
                   </div>
                 </TableCell>
               </TableRow>
@@ -202,7 +242,7 @@ export function DataTable() {
             variant="outline"
             size="sm"
             onClick={() => setPage(page > 1 ? page - 1 : 1)}
-            disabled={page === 1 || data.length === 0}
+            disabled={page === 1 || data.length === 0 || noData}
           >
             <ChevronLeft className="h-4 w-4" />
           </Button>
@@ -213,7 +253,7 @@ export function DataTable() {
             variant="outline"
             size="sm"
             onClick={() => setPage(page + 1)}
-            disabled={page === totalPages || totalPages === 0 || data.length === 0}
+            disabled={page === totalPages || totalPages === 0 || data.length === 0 || noData}
           >
             <ChevronRight className="h-4 w-4" />
           </Button>
@@ -222,4 +262,3 @@ export function DataTable() {
     </div>
   )
 }
-

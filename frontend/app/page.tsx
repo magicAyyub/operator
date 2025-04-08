@@ -1,8 +1,6 @@
-import { Suspense } from "react"
 import { DataTable } from "@/components/data-table"
 import { DataFilter } from "@/components/data-filter"
 import { DataStats } from "@/components/data-stats"
-import { Skeleton } from "@/components/ui/skeleton"
 import { ActionBar } from "@/components/action-bar"
 
 export default function Home() {
@@ -19,25 +17,16 @@ export default function Home() {
 
       <div className="container mx-auto py-8 space-y-8">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <Suspense fallback={<Skeleton className="h-[180px] w-full" />}>
-            <DataStats type="operators" />
-          </Suspense>
-          <Suspense fallback={<Skeleton className="h-[180px] w-full" />}>
-            <DataStats type="status" />
-          </Suspense>
-          <Suspense fallback={<Skeleton className="h-[180px] w-full" />}>
-            <DataStats type="2fa" />
-          </Suspense>
+          <DataStats type="operators" />
+          <DataStats type="status" />
+          <DataStats type="2fa" />
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border p-6">
           <DataFilter />
-          <Suspense fallback={<div className="h-96 flex items-center justify-center">Chargement des données...</div>}>
-            <DataTable />
-          </Suspense>
+          <DataTable />
         </div>
       </div>
     </main>
   )
 }
-

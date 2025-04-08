@@ -107,10 +107,10 @@ async def process_single_file(
     finally:
         file_result['processing_time'] = str(datetime.now() - start_time)
         # Clean up temporary files
-        # if 'input_path' in locals() and input_path.exists():
-        #     input_path.unlink()
-        # if 'output_path' in locals() and output_path.exists():
-        #     output_path.unlink()
+        if 'input_path' in locals() and input_path.exists():
+            input_path.unlink()
+        if 'output_path' in locals() and output_path.exists():
+            output_path.unlink()
         
     return file_result
 
@@ -217,9 +217,13 @@ async def process_files_endpoint(
         except Exception as e:
             logger.error(f"Failed to save combined output: {str(e)}")
 
-    # Clean up mapping file
-    # if mapping_path.exists():
-    #     mapping_path.unlink()
+    # Clean all file in upload_dir except combined output (input.csv)
+    for file in upload_dir.iterdir():
+        if file != combined_output_path:
+            try:
+                file.unlink()
+            except Exception as e:
+                logger.error(f"Failed to delete temporary file {file}: {str(e)}")
 
     # Prepare response
     success_count = sum(1 for r in results if r['success'])

@@ -1,9 +1,39 @@
+"use client"
+
+import { useEffect, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { getStats } from "@/lib/data"
 import { Chart } from "./chart"
+import { AlertCircle } from "lucide-react"
 
-export async function DataStats({ type }) {
-  const stats = await getStats(type)
+export function DataStats({ type }) {
+  const [stats, setStats] = useState([])
+  const [error, setError] = useState(null)
+  const [noData, setNoData] = useState(false)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    async function fetchStats() {
+      try {
+        const response = await getStats(type)
+
+        // Vérifier si nous avons un message indiquant qu'il n'y a pas de données
+        if (response.message === "no_data" || response.message === "timeout") {
+          setNoData(true)
+        } else if (response.error) {
+          setError(response.error)
+        } else {
+          setStats(response)
+        }
+      } catch (e) {
+        setError("Erreur lors du chargement des statistiques")
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchStats()
+  }, [type])
 
   const getTitle = () => {
     switch (type) {
@@ -37,9 +67,26 @@ export async function DataStats({ type }) {
         <CardTitle className="text-base font-medium">{getTitle()}</CardTitle>
       </CardHeader>
       <CardContent>
-        <Chart data={stats} color={getColor()} />
+        {loading ? (
+          <div className="h-[140px] flex flex-col items-center justify-center text-center">
+            <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mb-2"></div>
+            <p className="text-sm text-muted-foreground">Chargement...</p>
+          </div>
+        ) : noData ? (
+          <div className="h-[140px] flex flex-col items-center justify-center text-center">
+            <AlertCircle className="h-8 w-8 text-muted-foreground mb-1" />
+            <p className="text-sm text-muted-foreground">Aucune donnée disponible</p>
+            <p className="text-xs text-muted-foreground mt-1">Importez un fichier CSV pour commencer</p>
+          </div>
+        ) : error ? (
+          <div className="h-[140px] flex flex-col items-center justify-center text-center">
+            <AlertCircle className="h-8 w-8 text-red-500 mb-1" />
+            <p className="text-sm text-muted-foreground">{error}</p>
+          </div>
+        ) : (
+          <Chart data={stats} color={getColor()} title={getTitle()} />
+        )}
       </CardContent>
     </Card>
   )
 }
-
