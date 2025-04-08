@@ -9,10 +9,11 @@ import logging
 import pandas as pd
 from datetime import datetime
 import shutil
+import platform
 from src.utils.settings import Config
 from src.utils.helpers import join_operator_data
 
-# Set up logging
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -25,20 +26,101 @@ router = APIRouter(
     responses={404: {"description": "Not found"}}
 )
 
-def validate_file_extension(filename: str, allowed_extensions: set) -> bool:
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in allowed_extensions
+def is_wsl() -> bool:
+    """Check if running in WSL environment"""
+    return 'microsoft' in platform.uname().release.lower()
 
-def clean_directory(directory: Path, exclude: list = None):
-    """Clean up directory except excluded files"""
-    exclude = exclude or []
-    for item in directory.iterdir():
-        if item.name not in exclude:
-            if item.is_file():
-                item.unlink()
-            else:
-                shutil.rmtree(item)
+def get_executable_command(executable_path: Path) -> list:
+    """Get the appropriate command for the executable based on environment"""
+    if is_wsl():
+        # If running in WSL but executable is Windows binary
+        if '.exe' in executable_path.suffix.lower():
+            return ['wsl', str(executable_path)]
+        return [str(executable_path)]
+    return [str(executable_path)]
+
+async def process_single_file(
+    file: UploadFile,
+    idx: int,
+    total_files: int,
+    upload_dir: Path,
+    mapping_path: Path,
+    executable_cmd: list
+) -> dict:
+    """Process a single file and return result dictionary"""
+    file_result = {
+        'filename': file.filename,
+        'success': False,
+        'error': None,
+        'processing_time': None
+    }
+    start_time = datetime.now()
+    
+    try:
+        # Save input file
+        input_path = upload_dir / Path(file.filename).name
+        if not await save_upload_file(file, input_path):
+            file_result['error'] = "Could not save input file"
+            return file_result
+
+        # Prepare output path
+        output_path = upload_dir / f'output_{Path(file.filename).stem}.csv'
+        
+        # Execute processing
+        cmd = executable_cmd + [str(input_path), str(output_path)]
+        logger.info(f"Executing: {' '.join(cmd)}")
+
+        try:
+            process = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+
+            # Check process results
+            if process.returncode != 0:
+                error_msg = process.stderr or "Unknown processing error"
+                file_result['error'] = clean_error_message(error_msg)
+                return file_result
+
+            # Process output with mapping
+            processed_output = join_operator_data(output_path, mapping_path)
+            if not processed_output or not Path(processed_output).exists():
+                file_result['error'] = "Failed to join operator data"
+                return file_result
+
+            file_result['success'] = True
+            file_result['output_file'] = Path(processed_output).name
+            return file_result
+
+        except subprocess.TimeoutExpired:
+            file_result['error'] = "Processing timed out"
+        except subprocess.CalledProcessError as e:
+            file_result['error'] = f"Processing failed: {str(e)}"
+        except Exception as e:
+            file_result['error'] = f"Unexpected error: {str(e)}"
+
+    except Exception as e:
+        logger.error(f"Error processing {file.filename}: {str(e)}")
+        file_result['error'] = f"Processing error: {str(e)}"
+    finally:
+        file_result['processing_time'] = str(datetime.now() - start_time)
+        # Clean up temporary files
+        if 'input_path' in locals() and input_path.exists():
+            input_path.unlink()
+        if 'output_path' in locals() and output_path.exists():
+            output_path.unlink()
+        
+    return file_result
+
+def clean_error_message(error_msg: str) -> str:
+    """Clean and truncate error messages"""
+    error_msg = error_msg.replace('\n', ' ').strip()
+    return error_msg[:500]  # Truncate long error messages
 
 async def save_upload_file(upload_file: UploadFile, destination: Path) -> bool:
+    """Save uploaded file to destination"""
     try:
         with destination.open("wb") as buffer:
             shutil.copyfileobj(upload_file.file, buffer)
@@ -55,10 +137,9 @@ async def process_files_endpoint(
     """Endpoint for processing multiple data files with a mapping file"""
     start_time = datetime.now()
     logger.info(f"Process files endpoint called at {start_time}")
-    
+
     # Validate input files
     if not dataFiles:
-        logger.error("No data files provided")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No data files provided"
@@ -66,39 +147,28 @@ async def process_files_endpoint(
 
     # Validate file extensions
     for file in dataFiles:
-        if not validate_file_extension(file.filename, {'txt'}):
-            logger.error(f"Invalid file format for {file.filename}")
+        if not file.filename.lower().endswith('.txt'):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f'Invalid file format for {file.filename}. Only .txt files are allowed.'
+                detail=f'Invalid file format for {file.filename}. Only .txt files allowed.'
             )
 
-    if not validate_file_extension(mappingFile.filename, {'csv'}):
-        logger.error(f"Invalid mapping file format: {mappingFile.filename}")
+    if not mappingFile.filename.lower().endswith('.csv'):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail='Invalid mapping file format. Only .csv files are allowed.'
+            detail='Invalid mapping file format. Only .csv files allowed.'
         )
 
-    # Verify and prepare working directory
+    # Setup working directory
     upload_dir = Path(Config.UPLOAD_FOLDER)
     upload_dir.mkdir(exist_ok=True, parents=True)
-    clean_directory(upload_dir, exclude=['input.csv'])  # Keep combined output if exists
-
-    # Verify C executable
+    
+    # Verify executable
     c_executable = Path(Config.C_EXECUTABLE_PATH)
     if not c_executable.exists():
-        logger.error(f"C executable not found at {c_executable}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Processing service unavailable"
-        )
-
-    if not os.access(c_executable, os.X_OK):
-        logger.error(f"C executable not executable at {c_executable}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Processing service not executable"
         )
 
     # Save mapping file
@@ -108,106 +178,43 @@ async def process_files_endpoint(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Could not save mapping file"
         )
-    logger.info(f"Mapping file saved to {mapping_path}")
+
+    # Get appropriate command for the environment
+    executable_cmd = get_executable_command(c_executable)
+    logger.info(f"Using command: {executable_cmd}")
 
     # Process files
     results = []
     combined_df = None
-    combined_output_path = upload_dir / 'input.csv'
 
     for idx, file in enumerate(dataFiles, 1):
-        file_start = datetime.now()
-        file_result = {
-            'filename': file.filename,
-            'success': False,
-            'error': None,
-            'processing_time': None
-        }
+        result = await process_single_file(
+            file=file,
+            idx=idx,
+            total_files=len(dataFiles),
+            upload_dir=upload_dir,
+            mapping_path=mapping_path,
+            executable_cmd=executable_cmd
+        )
+        results.append(result)
 
-        try:
-            logger.info(f"Processing file {idx}/{len(dataFiles)}: {file.filename}")
-            
-            # Save input file
-            input_path = upload_dir / Path(file.filename).name
-            if not await save_upload_file(file, input_path):
-                file_result['error'] = "Could not save input file"
-                results.append(file_result)
-                continue
-
-            # Prepare output path
-            output_path = upload_dir / f'output_{Path(file.filename).stem}.csv'
-
-            # Execute processing
-            cmd = [str(c_executable), str(input_path), str(output_path)]
-            logger.info(f"Executing: {' '.join(cmd)}")
-
+        # If successful, add to combined output
+        if result['success']:
             try:
-                process = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=60
-                )
-
-                # Log process output
-                if process.stdout:
-                    logger.debug(f"STDOUT: {process.stdout[:200]}...")
-                if process.stderr:
-                    logger.warning(f"STDERR: {process.stderr[:200]}...")
-
-                if process.returncode != 0:
-                    error_msg = process.stderr or "Unknown error during processing"
-                    file_result['error'] = error_msg[:200]
-                    results.append(file_result)
-                    continue
-
-                # Process output with mapping
-                processed_output = join_operator_data(output_path, mapping_path)
-                if not processed_output or not Path(processed_output).exists():
-                    file_result['error'] = "Failed to join operator data"
-                    results.append(file_result)
-                    continue
-
-                # Add to combined output
-                try:
-                    file_df = pd.read_csv(processed_output)
-                    if combined_df is None:
-                        combined_df = file_df
-                    else:
-                        combined_df = pd.concat([combined_df, file_df], ignore_index=True)
-                    
-                    file_result['success'] = True
-                    file_result['output_file'] = Path(processed_output).name
-                except Exception as e:
-                    file_result['error'] = f"Data processing error: {str(e)}"
-
-            except subprocess.TimeoutExpired:
-                file_result['error'] = "Processing timed out"
-            except subprocess.CalledProcessError as e:
-                file_result['error'] = f"Processing failed: {str(e)}"
+                output_path = upload_dir / result['output_file']
+                file_df = pd.read_csv(output_path)
+                combined_df = pd.concat([combined_df, file_df], ignore_index=True) if combined_df is not None else file_df
             except Exception as e:
-                file_result['error'] = f"Unexpected error: {str(e)}"
+                logger.error(f"Error combining output for {file.filename}: {str(e)}")
+                result['success'] = False
+                result['error'] = f"Output combination failed: {str(e)}"
 
-        except Exception as e:
-            logger.error(f"Error processing {file.filename}: {str(e)}")
-            logger.error(traceback.format_exc())
-            file_result['error'] = f"Processing error: {str(e)}"
-        finally:
-            # Clean up temporary files
-            if input_path.exists():
-                input_path.unlink()
-            if output_path.exists():
-                output_path.unlink()
-            
-            file_result['processing_time'] = str(datetime.now() - file_start)
-            results.append(file_result)
-
-    # Save combined output if successful
+    # Save combined output
+    combined_output_path = upload_dir / 'input.csv'
     if combined_df is not None and not combined_df.empty:
         try:
             combined_df.to_csv(combined_output_path, index=False)
             Config.PROCESSED_CSV = 'input.csv'
-            logger.info(f"Combined output saved to {combined_output_path}")
         except Exception as e:
             logger.error(f"Failed to save combined output: {str(e)}")
 
@@ -226,12 +233,13 @@ async def process_files_endpoint(
         'processing_time': processing_time,
         'details': results,
         'combined_output': 'input.csv' if combined_df is not None else None,
-        'system_info': {
+        'environment': {
+            'system': platform.system(),
+            'release': platform.release(),
+            'is_wsl': is_wsl(),
             'executable': str(c_executable),
-            'system': os.name,
-            'platform': os.uname().sysname if hasattr(os, 'uname') else 'Windows'
+            'command_used': ' '.join(executable_cmd)
         }
     }
 
-    logger.info(f"Processing completed in {processing_time}. Success: {success_count}/{len(dataFiles)}")
     return JSONResponse(content=response_data)
