@@ -4,9 +4,8 @@ import platform
 class Config:
     BASE_ROOT = "src/"
     UPLOAD_FOLDER = BASE_ROOT + "data/"
-    PROCESSED_CSV = "processed_data.csv"
-    SOCKETIO_CORS_ALLOWED_ORIGINS = "*"
-    
+    PROCESSED_CSV = 'input.csv'
+
     # Dynamically determine the executable path based on platform
     EXECUTABLE_DIR = BASE_ROOT + "executables/"
     
@@ -16,9 +15,7 @@ class Config:
     # Full path to the executable
     C_EXECUTABLE_PATH = EXECUTABLE_DIR + EXECUTABLE_NAME
     
-    DETECTOR_FIRST_INPUT = BASE_ROOT + "app/utils/tmp/sample.csv"
-    DETECTOR_SECOND_OUTPUT = BASE_ROOT + "app/utils/tmp/MAJNUM.csv"
-    PROCESSED_CSV = 'combined_output.csv'
+    
 
 # Allow requests from the frontend
 ORIGINS = [

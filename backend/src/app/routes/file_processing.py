@@ -85,7 +85,7 @@ async def process_single_file(
                 return file_result
 
             # Process output with mapping
-            processed_output = join_operator_data(output_path, mapping_path)
+            processed_output = join_operator_data(str(output_path), str(mapping_path))
             if not processed_output or not Path(processed_output).exists():
                 file_result['error'] = "Failed to join operator data"
                 return file_result
@@ -107,10 +107,10 @@ async def process_single_file(
     finally:
         file_result['processing_time'] = str(datetime.now() - start_time)
         # Clean up temporary files
-        if 'input_path' in locals() and input_path.exists():
-            input_path.unlink()
-        if 'output_path' in locals() and output_path.exists():
-            output_path.unlink()
+        # if 'input_path' in locals() and input_path.exists():
+        #     input_path.unlink()
+        # if 'output_path' in locals() and output_path.exists():
+        #     output_path.unlink()
         
     return file_result
 
@@ -202,7 +202,7 @@ async def process_files_endpoint(
         if result['success']:
             try:
                 output_path = upload_dir / result['output_file']
-                file_df = pd.read_csv(output_path)
+                file_df = pd.read_csv(output_path, low_memory=False)
                 combined_df = pd.concat([combined_df, file_df], ignore_index=True) if combined_df is not None else file_df
             except Exception as e:
                 logger.error(f"Error combining output for {file.filename}: {str(e)}")
@@ -214,13 +214,12 @@ async def process_files_endpoint(
     if combined_df is not None and not combined_df.empty:
         try:
             combined_df.to_csv(combined_output_path, index=False)
-            Config.PROCESSED_CSV = 'input.csv'
         except Exception as e:
             logger.error(f"Failed to save combined output: {str(e)}")
 
     # Clean up mapping file
-    if mapping_path.exists():
-        mapping_path.unlink()
+    # if mapping_path.exists():
+    #     mapping_path.unlink()
 
     # Prepare response
     success_count = sum(1 for r in results if r['success'])
@@ -238,7 +237,9 @@ async def process_files_endpoint(
             'release': platform.release(),
             'is_wsl': is_wsl(),
             'executable': str(c_executable),
-            'command_used': ' '.join(executable_cmd)
+            'command_used': ' '.join(executable_cmd),
+            'save_file': str(mapping_path),
+            'save_file2': str(output_path)
         }
     }
 
