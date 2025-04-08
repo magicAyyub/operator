@@ -58,8 +58,20 @@ def get_data(
         # Connexion à DuckDB avec une instance en mémoire pour de meilleures performances
         conn = duckdb.connect(":memory:")
         
-        # Construire la requête SQL de base
-        query = f"SELECT * FROM '{CSV_FILE_PATH}'"
+        # 1. Calculer d'abord le nombre total d'entrées et par opérateur (pour le pourcentage global)
+        total_count_query = f"SELECT COUNT(*) as total FROM '{CSV_FILE_PATH}'"
+        total_count = conn.execute(total_count_query).fetchone()[0]
+        
+        # Calculer le nombre total par opérateur (pour le pourcentage global)
+        operator_count_query = f"""
+            SELECT "Operateur" as operateur, COUNT(*) as count
+            FROM '{CSV_FILE_PATH}'
+            GROUP BY "Operateur"
+        """
+        operator_counts = {row[0]: row[1] for row in conn.execute(operator_count_query).fetchall()}
+        
+        # 2. Construire la requête SQL pour les données filtrées
+        base_query = f"SELECT * FROM '{CSV_FILE_PATH}'"
         
         # Ajouter les conditions de filtrage
         conditions = []
@@ -80,45 +92,66 @@ def get_data(
             conditions.append(f"EXTRACT(YEAR FROM CREATED_DATE) = {annee}")
         
         # Ajouter les conditions à la requête
+        filtered_query = base_query
         if conditions:
-            query += " WHERE " + " AND ".join(conditions)
+            filtered_query += " WHERE " + " AND ".join(conditions)
         
-        # Compter le nombre total de lignes pour la pagination
-        count_query = f"SELECT COUNT(*) as total FROM ({query}) as filtered_data"
-        total_count = conn.execute(count_query).fetchone()[0]
+        # 3. Compter le nombre d'entrées filtrées par opérateur
+        filtered_operator_query = f"""
+            SELECT "Operateur" as operateur, COUNT(*) as count
+            FROM ({filtered_query}) as filtered_data
+            GROUP BY "Operateur"
+        """
+        filtered_operator_counts = {row[0]: row[1] for row in conn.execute(filtered_operator_query).fetchall()}
         
-        # Ajouter la pagination
+        # 4. Compter le nombre total d'entrées filtrées
+        filtered_count_query = f"SELECT COUNT(*) as total FROM ({filtered_query}) as filtered_data"
+        filtered_total = conn.execute(filtered_count_query).fetchone()[0]
+        
+        # 5. Préparer les données pour la pagination
+        # Ajouter la pagination à la requête filtrée
         offset = (page - 1) * page_size
-        query += f" LIMIT {page_size} OFFSET {offset}"
+        paginated_query = f"""
+            SELECT "Operateur" as operateur, COUNT(*) as count
+            FROM ({filtered_query}) as filtered_data
+            GROUP BY "Operateur"
+            ORDER BY count DESC
+            LIMIT {page_size} OFFSET {offset}
+        """
         
-        # Exécuter la requête
-        result = conn.execute(query).fetchall()
-        columns = conn.execute(query).description
+        # Exécuter la requête paginée
+        paginated_results = conn.execute(paginated_query).fetchall()
         
-        # Créer un dictionnaire de colonnes
-        column_names = [col[0] for col in columns]
+        # 6. Calculer le nombre total de pages
+        total_pages = (len(filtered_operator_counts) + page_size - 1) // page_size
         
-        # Transformer les données pour le frontend
+        # 7. Transformer les données pour le frontend
         data = []
-        for row in result:
-            row_dict = dict(zip(column_names, row))
+        for row in paginated_results:
+            operateur = row[0]
+            filtered_count = row[1]
             
-            # Calculer le pourcentage IN (simulé pour cet exemple)
-            telephone = row_dict.get('TELEPHONE')
-            pourcentage_in = round(float(telephone) % 100, 2) if telephone is not None else 0
+            # Calculer le pourcentage global (basé sur toutes les données)
+            global_count = operator_counts.get(operateur, 0)
+            global_percentage = round((global_count / total_count * 100), 2) if total_count > 0 else 0
+            
+            # Calculer le pourcentage filtré (basé sur les données filtrées)
+            filtered_percentage = round((filtered_count / filtered_total * 100), 2) if filtered_total > 0 else 0
+            
+            # Déterminer si le pourcentage a baissé avec les filtres
+            percentage_change = filtered_percentage - global_percentage
             
             data.append({
-                "id": row_dict.get('UUID', ''),
-                "operateur": row_dict.get('Operateur', ''),
-                "nombre_in": int(telephone % 1000) if telephone is not None else 0,  # Simulé pour l'exemple
-                "pourcentage_in": pourcentage_in,
-                "statut": row_dict.get('USER_STATUS', ''),
-                "fa_statut": row_dict.get('2FA_STATUS', ''),
-                "date": row_dict.get('CREATED_DATE', '')
+                "id": operateur,  # Utiliser l'opérateur comme ID
+                "operateur": operateur,
+                "nombre_in": filtered_count,
+                "pourcentage_in": global_percentage,  # Pourcentage global
+                "pourcentage_filtre": filtered_percentage,  # Pourcentage filtré
+                "variation": percentage_change,  # Variation entre les deux
+                "statut": "",  # Ces champs ne sont plus pertinents au niveau agrégé
+                "fa_statut": "",
+                "date": ""
             })
-        
-        # Calculer le nombre total de pages
-        total_pages = (total_count + page_size - 1) // page_size
         
         # Fermer la connexion
         conn.close()
@@ -127,7 +160,8 @@ def get_data(
         return {
             "data": data,
             "total_pages": total_pages,
-            "total_count": total_count
+            "total_count": filtered_total,
+            "is_filtered": len(conditions) > 0
         }
     except Exception as e:
         return {
@@ -299,14 +333,12 @@ def export_csv(
         # Connexion à DuckDB avec une instance en mémoire pour de meilleures performances
         conn = duckdb.connect(":memory:")
         
-        # Utiliser une requête SQL optimisée pour l'agrégation directe
-        query = f"""
-            SELECT 
-                "Operateur" as operateur,
-                COUNT(*) as nombre_in,
-                ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM '{CSV_FILE_PATH}'), 2) as pourcentage_in
-            FROM '{CSV_FILE_PATH}'
-        """
+        # 1. Calculer d'abord le nombre total d'entrées (pour le pourcentage global)
+        total_count_query = f"SELECT COUNT(*) as total FROM '{CSV_FILE_PATH}'"
+        total_count = conn.execute(total_count_query).fetchone()[0]
+        
+        # 2. Construire la requête SQL pour les données filtrées
+        base_query = f"SELECT * FROM '{CSV_FILE_PATH}'"
         
         # Ajouter les conditions de filtrage
         conditions = []
@@ -327,17 +359,27 @@ def export_csv(
             conditions.append(f"EXTRACT(YEAR FROM CREATED_DATE) = {annee}")
         
         # Ajouter les conditions à la requête
+        filtered_query = base_query
         if conditions:
-            query += " WHERE " + " AND ".join(conditions)
+            filtered_query += " WHERE " + " AND ".join(conditions)
         
-        # Compléter la requête avec le regroupement et le tri
-        query += " GROUP BY operateur ORDER BY nombre_in DESC"
+        # 3. Calculer le nombre d'entrées filtrées par opérateur
+        result_query = f"""
+            SELECT 
+                "Operateur" as "Opérateur",
+                COUNT(*) as "Nombre d'IN",
+                ROUND(COUNT(*) * 100.0 / {total_count}, 2) as "Pourcentage IN (parc global)"
+            FROM ({filtered_query}) as filtered_data
+            GROUP BY "Operateur"
+            ORDER BY "Nombre d'IN" DESC
+        """
         
         # Exécuter la requête
-        result = conn.execute(query).fetchall()
+        result = conn.execute(result_query).fetchall()
+        columns = ["Opérateur", "Nombre d'IN", "Pourcentage IN (parc global)"]
         
         # Créer le CSV manuellement pour éviter de charger tout en mémoire
-        csv_content = "Opérateur,Nombre d'IN,Pourcentage IN (%)\n"
+        csv_content = ",".join(columns) + "\n"
         
         for row in result:
             csv_content += f"{row[0]},{row[1]},{row[2]}\n"

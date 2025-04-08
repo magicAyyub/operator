@@ -76,7 +76,7 @@ export function DataStats({ type }) {
           <div className="h-[140px] flex flex-col items-center justify-center text-center">
             <AlertCircle className="h-8 w-8 text-muted-foreground mb-1" />
             <p className="text-sm text-muted-foreground">Aucune donnée disponible</p>
-            <p className="text-xs text-muted-foreground mt-1">Importez un fichier CSV pour commencer</p>
+            <p className="text-xs text-muted-foreground mt-1">Importez les fichiers pour commencer</p>
           </div>
         ) : error ? (
           <div className="h-[140px] flex flex-col items-center justify-center text-center">

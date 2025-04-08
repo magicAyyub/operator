@@ -5,12 +5,25 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Button } from "@/components/ui/button"
 import { useSearchParams } from "next/navigation"
 import { useData } from "@/hooks/use-data"
-import { Download, ChevronLeft, ChevronRight, FileSpreadsheet, AlertCircle, Database, FilterX } from "lucide-react"
+import {
+  Download,
+  ChevronLeft,
+  ChevronRight,
+  FileSpreadsheet,
+  AlertCircle,
+  Database,
+  FilterX,
+  TrendingDown,
+  TrendingUp,
+  Minus,
+} from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
 export function DataTable() {
   const [page, setPage] = useState(1)
   const searchParams = useSearchParams()
-  const { data, isLoading, totalPages, message } = useData(page)
+  const { data, isLoading, totalPages, message, isFiltered } = useData(page)
 
   const handleExport = async () => {
     const params = new URLSearchParams(searchParams)
@@ -80,13 +93,78 @@ export function DataTable() {
     return filters
   }
 
+  // Fonction pour afficher l'indicateur de variation
+  const renderVariationIndicator = (variation) => {
+    if (!isFiltered) return null
+
+    // Arrondir à 2 décimales
+    const roundedVariation = Math.round(variation * 100) / 100
+
+    if (roundedVariation > 0.1) {
+      return (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="inline-flex items-center text-green-600 ml-2">
+                <TrendingUp className="h-4 w-4 mr-1" />
+                <span className="text-xs">+{roundedVariation.toFixed(2)}%</span>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Augmentation de {roundedVariation.toFixed(2)}% avec les filtres appliqués</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      )
+    } else if (roundedVariation < -0.1) {
+      return (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="inline-flex items-center text-red-600 ml-2">
+                <TrendingDown className="h-4 w-4 mr-1" />
+                <span className="text-xs">{roundedVariation.toFixed(2)}%</span>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Diminution de {Math.abs(roundedVariation).toFixed(2)}% avec les filtres appliqués</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      )
+    } else {
+      return (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="inline-flex items-center text-gray-500 ml-2">
+                <Minus className="h-4 w-4 mr-1" />
+                <span className="text-xs">0%</span>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Pas de changement significatif avec les filtres appliqués</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      )
+    }
+  }
+
   // Vérifier si nous avons un message indiquant qu'il n'y a pas de données
   const noData = message === "no_data"
 
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center">
-        <h2 className="text-xl font-semibold">Résultats</h2>
+        <div>
+          <h2 className="text-xl font-semibold">Résultats</h2>
+          {isFiltered && (
+            <p className="text-sm text-muted-foreground mt-1">
+              Les filtres sont appliqués. Le pourcentage global reste calculé sur l'ensemble des données.
+            </p>
+          )}
+        </div>
         <div className="flex gap-2">
           <Button
             onClick={handleExportInDetails}
@@ -115,16 +193,28 @@ export function DataTable() {
             <TableRow>
               <TableHead className="w-[200px]">Opérateur</TableHead>
               <TableHead>Nombre d'IN</TableHead>
-              <TableHead>% IN (parc global)</TableHead>
-              <TableHead>Statut</TableHead>
-              <TableHead>2FA_Statut</TableHead>
-              <TableHead>Date</TableHead>
+              <TableHead>
+                % IN (parc global)
+                {isFiltered && (
+                  <Badge variant="outline" className="ml-2 font-normal">
+                    Global
+                  </Badge>
+                )}
+              </TableHead>
+              {isFiltered && (
+                <TableHead>
+                  % IN (filtré)
+                  <Badge variant="outline" className="ml-2 font-normal">
+                    Filtré
+                  </Badge>
+                </TableHead>
+              )}
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={6} className="h-24 text-center">
+                <TableCell colSpan={isFiltered ? 4 : 3} className="h-24 text-center">
                   <div className="flex flex-col items-center justify-center">
                     <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mb-2"></div>
                     <p className="text-sm text-muted-foreground">Chargement des données...</p>
@@ -133,7 +223,7 @@ export function DataTable() {
               </TableRow>
             ) : noData ? (
               <TableRow>
-                <TableCell colSpan={6} className="h-64">
+                <TableCell colSpan={isFiltered ? 4 : 3} className="h-64">
                   <div className="flex flex-col items-center justify-center text-center p-6">
                     <AlertCircle className="h-12 w-12 text-muted-foreground mb-4" />
                     <h3 className="text-lg font-medium mb-2">Aucune donnée disponible</h3>
@@ -160,7 +250,7 @@ export function DataTable() {
               </TableRow>
             ) : data.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="h-64">
+                <TableCell colSpan={isFiltered ? 4 : 3} className="h-64">
                   <div className="flex flex-col items-center justify-center text-center p-6">
                     <AlertCircle className="h-12 w-12 text-muted-foreground mb-4" />
                     <h3 className="text-lg font-medium mb-2">Aucune donnée trouvée</h3>
@@ -222,10 +312,10 @@ export function DataTable() {
                 <TableRow key={row.id}>
                   <TableCell className="font-medium">{row.operateur}</TableCell>
                   <TableCell>{row.nombre_in}</TableCell>
-                  <TableCell>{row.pourcentage_in}%</TableCell>
-                  <TableCell>{row.statut}</TableCell>
-                  <TableCell>{row.fa_statut}</TableCell>
-                  <TableCell>{new Date(row.date).toLocaleDateString()}</TableCell>
+                  <TableCell>
+                    {row.pourcentage_in}%{renderVariationIndicator(row.variation)}
+                  </TableCell>
+                  {isFiltered && <TableCell>{row.pourcentage_filtre}%</TableCell>}
                 </TableRow>
               ))
             )}

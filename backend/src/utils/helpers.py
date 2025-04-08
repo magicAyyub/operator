@@ -94,12 +94,6 @@ def join_operator_data(output_path, mapping_path):
         # Combine all results
         result_idrh = pd.concat([result_idrh_3, result_idrh_4, result_idrh_5], axis=0)
         
-        # Add foreign numbers (without operator information)
-        if not df_numero_etrangers.empty:
-            # Add 'Operateur' column with 'Étranger' value for foreign numbers
-            df_numero_etrangers['Operateur'] = 'Étranger'
-            result_idrh = pd.concat([result_idrh, df_numero_etrangers], axis=0)
-        
         # Keep only the original columns plus the Operateur column
         original_columns = df.columns.tolist()
         if 'Operateur' not in original_columns:

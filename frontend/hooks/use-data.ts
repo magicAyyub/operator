@@ -9,6 +9,7 @@ export function useData(page = 1, pageSize = 10) {
   const [isLoading, setIsLoading] = useState(true)
   const [totalPages, setTotalPages] = useState(0)
   const [message, setMessage] = useState(null)
+  const [isFiltered, setIsFiltered] = useState(false)
   const searchParams = useSearchParams()
 
   useEffect(() => {
@@ -19,11 +20,13 @@ export function useData(page = 1, pageSize = 10) {
         setData(result.data || [])
         setTotalPages(result.total_pages || 0)
         setMessage(result.message || null)
+        setIsFiltered(result.is_filtered || false)
       } catch (error) {
         console.error("Erreur lors de la récupération des données:", error)
         setData([])
         setTotalPages(0)
         setMessage("error")
+        setIsFiltered(false)
       } finally {
         setIsLoading(false)
       }
@@ -32,5 +35,5 @@ export function useData(page = 1, pageSize = 10) {
     fetchData()
   }, [page, pageSize, searchParams])
 
-  return { data, isLoading, totalPages, message }
+  return { data, isLoading, totalPages, message, isFiltered }
 }
