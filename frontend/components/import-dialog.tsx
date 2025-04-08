@@ -14,7 +14,7 @@ import {
 import { FileText, CheckCircle, AlertCircle, FileUp, Database, Loader2, Settings, Cog, Server } from "lucide-react"
 
 // Configure this to match your backend URL
-const BACKEND_URL = "http://localhost:5000"
+const BACKEND_URL = "http://localhost:8000"
 
 export function ImportDialog() {
   const [dataFiles, setDataFiles] = useState([])

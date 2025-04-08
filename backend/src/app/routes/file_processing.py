@@ -48,7 +48,7 @@ async def process_files_endpoint(
     os.makedirs(Path(Config.UPLOAD_FOLDER), exist_ok=True)
     
     # Save mapping file
-    mapping_path = Path(Config.UPLOAD_FOLDE) / Path(mappingFile.filename).name
+    mapping_path = Path(Config.UPLOAD_FOLDER) / Path(mappingFile.filename).name
     try:
         with open(mapping_path, "wb") as f:
             f.write(await mappingFile.read())
@@ -71,7 +71,7 @@ async def process_files_endpoint(
         try:
             logger.info(f"Processing file {idx}/{total_files}: {file.filename}")
             
-            input_path = Path(Config.UPLOAD_FOLDER) / Path(file.filename).name
+            input_path = (Path(Config.UPLOAD_FOLDER) / Path(file.filename)).name
             output_path = Path(Config.UPLOAD_FOLDER) / f'output_{Path(file.filename).name}.csv'
             
             # Save the data file

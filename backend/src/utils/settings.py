@@ -9,14 +9,18 @@ class Config:
     # if you are using linux, you can use the C source code
 
     # C_EXECUTABLE_PATH = BASE_ROOT /"utils/data_processor"
-    C_EXECUTABLE_PATH = BASE_ROOT + "utils/data_processor.exe"
+    C_EXECUTABLE_PATH = BASE_ROOT + "executables/data_processor.exe"
     DETECTOR_FIRST_INPUT = BASE_ROOT + "app/utils/tmp/sample.csv"
     DETECTOR_SECOND_OUTPUT = BASE_ROOT + "app/utils/tmp/MAJNUM.csv"
     PROCESSED_CSV = 'combined_output.csv'
 
 # Allow requests from the frontend
 ORIGINS = [
+    'http://localhost:3000',
     "http://localhost:3000",
     "http://localhost:3000/api",
     "localhost:3000/api",
+    "localhost:3000/",
+    "http://localhost:8000",
+    "http://localhost:8000/api",
 ]
