@@ -30,7 +30,7 @@ export function DataTable() {
 
     try {
       // Ouvrir une nouvelle fenêtre avec l'URL d'exportation
-      const exportUrl = `http://localhost:8000/api/csv/export?${params.toString()}`
+      const exportUrl = `/api/csv/export?${params.toString()}`
       window.open(exportUrl, "_blank")
     } catch (error) {
       console.error("Erreur lors de l'exportation:", error)
@@ -55,7 +55,8 @@ export function DataTable() {
       searchParams.get("limite_type") !== "none"
     ) {
       const operator = searchParams.get("limite_type") === "lt" ? "<" : ">"
-      filters.push(`Pourcentage IN ${operator} ${searchParams.get("limite_valeur")}%`)
+      const baseText = searchParams.get("filtre_global") === "true" ? "(sur parc global)" : "(sur données filtrées)"
+      filters.push(`Pourcentage IN ${operator} ${searchParams.get("limite_valeur")}% ${baseText}`)
     }
 
     if (searchParams.get("date_min")) {

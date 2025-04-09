@@ -41,6 +41,7 @@ def get_data(
     fa_statut: Optional[str] = None,
     limite_type: Optional[str] = None,
     limite_valeur: Optional[float] = None,
+    filtre_global: Optional[bool] = False,
     date_min: Optional[str] = None,
     date_max: Optional[str] = None,
     annee: Optional[str] = None
@@ -139,8 +140,11 @@ def get_data(
         if limite_type and limite_type != 'none' and limite_valeur is not None:
             filtered_data = []
             for item in all_operators_data:
-                # Utiliser le pourcentage filtré pour la comparaison
-                percentage_to_check = item["pourcentage_filtre"]
+                # Choisir le pourcentage à vérifier en fonction de filtre_global
+                if filtre_global:
+                    percentage_to_check = item["pourcentage_in"]
+                else:
+                    percentage_to_check = item["pourcentage_filtre"]
                 
                 if limite_type == 'lt' and percentage_to_check < float(limite_valeur):
                     filtered_data.append(item)
@@ -326,6 +330,7 @@ def export_csv(
     fa_statut: Optional[str] = None,
     limite_type: Optional[str] = None,
     limite_valeur: Optional[float] = None,
+    filtre_global: Optional[bool] = False,
     date_min: Optional[str] = None,
     date_max: Optional[str] = None,
     annee: Optional[str] = None
@@ -420,8 +425,11 @@ def export_csv(
         if limite_type and limite_type != 'none' and limite_valeur is not None:
             filtered_data = []
             for item in all_operators_data:
-                # Utiliser le pourcentage filtré pour la comparaison
-                percentage_to_check = item["pourcentage_filtre"]
+                # Choisir le pourcentage à vérifier en fonction de filtre_global
+                if filtre_global:
+                    percentage_to_check = item["pourcentage_global"]
+                else:
+                    percentage_to_check = item["pourcentage_filtre"]
                 
                 if limite_type == 'lt' and percentage_to_check < float(limite_valeur):
                     filtered_data.append(item)

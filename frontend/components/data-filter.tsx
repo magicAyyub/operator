@@ -15,6 +15,7 @@ import type { DateRange } from "react-day-picker"
 import { format, startOfYear, endOfYear } from "date-fns"
 import { fr } from "date-fns/locale"
 import { Card, CardContent } from "@/components/ui/card"
+import { Checkbox } from "@/components/ui/checkbox"
 
 export function DataFilter() {
   const router = useRouter()
@@ -25,6 +26,7 @@ export function DataFilter() {
   const [faStatut, setFaStatut] = useState(searchParams.get("fa_statut") || "all")
   const [limiteType, setLimiteType] = useState(searchParams.get("limite_type") || "none")
   const [limiteValeur, setLimiteValeur] = useState(searchParams.get("limite_valeur") || "")
+  const [filtrerParGlobal, setFiltrerParGlobal] = useState(searchParams.get("filtre_global") === "true")
   const [annee, setAnnee] = useState(searchParams.get("annee") || "all")
 
   // État pour la plage de dates
@@ -97,6 +99,10 @@ export function DataFilter() {
     if (limiteType !== "none" && limiteValeur) {
       params.set("limite_type", limiteType)
       params.set("limite_valeur", limiteValeur)
+
+      if (filtrerParGlobal) {
+        params.set("filtre_global", "true")
+      }
     }
 
     if (dateRange?.from) {
@@ -120,6 +126,7 @@ export function DataFilter() {
     setFaStatut("all")
     setLimiteType("none")
     setLimiteValeur("")
+    setFiltrerParGlobal(false)
     setDateRange(undefined)
     setAnnee("all")
     router.push("/")
@@ -268,10 +275,25 @@ export function DataFilter() {
                   disabled={limiteType === "none"}
                 />
               </div>
+
+              <div className="flex items-center space-x-2 mt-2">
+                <Checkbox
+                  id="filtre-global"
+                  checked={filtrerParGlobal}
+                  onCheckedChange={(checked) => setFiltrerParGlobal(checked === true)}
+                  disabled={limiteType === "none"}
+                />
+                <label
+                  htmlFor="filtre-global"
+                  className={`text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 ${limiteType === "none" ? "text-muted-foreground" : ""}`}
+                >
+                  Filtrer par pourcentage global
+                </label>
+              </div>
             </div>
 
             <div className="pt-4">
-              <Button onClick={handleFilter} className="w-full flex items-center justify-center gap-2">
+              <Button onClick={handleFilter} className="w-full flex items-center justify-center gap-2 cursor-pointer">
                 <Filter className="h-4 w-4" />
                 Appliquer les filtres
               </Button>
