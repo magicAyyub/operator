@@ -126,12 +126,11 @@ export function DataFilter() {
   }
 
   return (
-    <div className="space-y-4">
-    <h2 className="text-xl font-semibold">Filtres</h2>
     <Card className="mb-6">
       <CardContent>
         <div className="flex justify-between items-center mb-4">
-          <Button variant="secondary" onClick={handleReset} className="flex items-center gap-2 text-muted-foreground hover:text-primary cursor-pointer">
+          <h2 className="text-xl font-semibold">Filtres</h2>
+          <Button variant="secondary" onClick={handleReset} className="flex items-center gap-2 text-muted-foreground cursor-pointer hover:text-primary">
             <FilterX className="h-4 w-4" />
             Réinitialiser
           </Button>
@@ -272,7 +271,7 @@ export function DataFilter() {
             </div>
 
             <div className="pt-4">
-              <Button onClick={handleFilter} className="w-full flex items-center justify-center gap-2 cursor-pointer">
+              <Button onClick={handleFilter} className="w-full flex items-center justify-center gap-2">
                 <Filter className="h-4 w-4" />
                 Appliquer les filtres
               </Button>
@@ -281,6 +280,5 @@ export function DataFilter() {
         </div>
       </CardContent>
     </Card>
-      </div>
   )
 }

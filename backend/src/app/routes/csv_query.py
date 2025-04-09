@@ -6,7 +6,7 @@ import pandas as pd
 import os
 import shutil
 from io import StringIO
-from datetime import datetime
+from datetime import datetime, timedelta
 import time
 
 router = APIRouter(
@@ -70,6 +70,11 @@ def get_data(
         """
         operator_counts = {row[0]: row[1] for row in conn.execute(operator_count_query).fetchall()}
         
+        # Calculer les pourcentages globaux pour tous les opérateurs (indépendamment des filtres)
+        global_percentages = {}
+        for operateur, count in operator_counts.items():
+            global_percentages[operateur] = round((count / total_count * 100), 2) if total_count > 0 else 0
+        
         # 2. Construire la requête SQL pour les données filtrées
         base_query = f"SELECT * FROM '{CSV_FILE_PATH}'"
         
@@ -82,11 +87,15 @@ def get_data(
         if fa_statut and fa_statut != 'all':
             conditions.append(f"\"2FA_STATUS\" = '{fa_statut}'")
         
+        # Correction du problème de date : ajouter un jour à date_max pour inclure la date sélectionnée
         if date_min:
             conditions.append(f"CREATED_DATE >= '{date_min}'")
         
         if date_max:
-            conditions.append(f"CREATED_DATE <= '{date_max}'")
+            # Ajouter un jour à date_max pour inclure la date sélectionnée
+            date_max_obj = datetime.strptime(date_max, "%Y-%m-%d")
+            date_max_plus_one = (date_max_obj + timedelta(days=1)).strftime("%Y-%m-%d")
+            conditions.append(f"CREATED_DATE < '{date_max_plus_one}'")
         
         if annee and annee != 'all':
             conditions.append(f"EXTRACT(YEAR FROM CREATED_DATE) = {annee}")
@@ -108,60 +117,58 @@ def get_data(
         filtered_count_query = f"SELECT COUNT(*) as total FROM ({filtered_query}) as filtered_data"
         filtered_total = conn.execute(filtered_count_query).fetchone()[0]
         
-        # 5. Préparer les données pour la pagination
-        # Ajouter la pagination à la requête filtrée
-        offset = (page - 1) * page_size
-        paginated_query = f"""
-            SELECT "Operateur" as operateur, COUNT(*) as count
-            FROM ({filtered_query}) as filtered_data
-            GROUP BY "Operateur"
-            ORDER BY count DESC
-            LIMIT {page_size} OFFSET {offset}
-        """
+        # 5. Préparer les données pour tous les opérateurs qui ont des entrées après filtrage
+        all_operators_data = []
         
-        # Exécuter la requête paginée
-        paginated_results = conn.execute(paginated_query).fetchall()
-        
-        # 6. Calculer le nombre total de pages
-        total_pages = (len(filtered_operator_counts) + page_size - 1) // page_size
-        
-        # 7. Transformer les données pour le frontend
-        data = []
-        for row in paginated_results:
-            operateur = row[0]
-            filtered_count = row[1]
-            
-            # Calculer le pourcentage global (basé sur toutes les données)
-            global_count = operator_counts.get(operateur, 0)
-            global_percentage = round((global_count / total_count * 100), 2) if total_count > 0 else 0
+        for operateur, filtered_count in filtered_operator_counts.items():
+            # Récupérer le pourcentage global pour cet opérateur (calculé précédemment)
+            global_percentage = global_percentages.get(operateur, 0)
             
             # Calculer le pourcentage filtré (basé sur les données filtrées)
             filtered_percentage = round((filtered_count / filtered_total * 100), 2) if filtered_total > 0 else 0
             
-            # Déterminer si le pourcentage a baissé avec les filtres
-            percentage_change = filtered_percentage - global_percentage
-            
-            data.append({
+            all_operators_data.append({
                 "id": operateur,  # Utiliser l'opérateur comme ID
                 "operateur": operateur,
-                "nombre_in": filtered_count,
-                "pourcentage_in": global_percentage,  # Pourcentage global
+                "nombre_in": filtered_count,  # Nombre filtré
+                "pourcentage_in": global_percentage,  # Pourcentage global (indépendant des filtres)
                 "pourcentage_filtre": filtered_percentage,  # Pourcentage filtré
-                "variation": percentage_change,  # Variation entre les deux
-                "statut": "",  # Ces champs ne sont plus pertinents au niveau agrégé
-                "fa_statut": "",
-                "date": ""
             })
+        
+        # 6. Appliquer le filtre de limite si nécessaire
+        if limite_type and limite_type != 'none' and limite_valeur is not None:
+            filtered_data = []
+            for item in all_operators_data:
+                # Utiliser le pourcentage filtré pour la comparaison
+                percentage_to_check = item["pourcentage_filtre"]
+                
+                if limite_type == 'lt' and percentage_to_check < float(limite_valeur):
+                    filtered_data.append(item)
+                elif limite_type == 'gt' and percentage_to_check > float(limite_valeur):
+                    filtered_data.append(item)
+            
+            all_operators_data = filtered_data
+        
+        # 7. Trier les données par nombre d'IN (filtré) décroissant
+        all_operators_data.sort(key=lambda x: x["nombre_in"], reverse=True)
+        
+        # 8. Appliquer la pagination
+        start_idx = (page - 1) * page_size
+        end_idx = start_idx + page_size
+        paginated_data = all_operators_data[start_idx:end_idx]
+        
+        # 9. Calculer le nombre total de pages
+        total_pages = (len(all_operators_data) + page_size - 1) // page_size if all_operators_data else 0
         
         # Fermer la connexion
         conn.close()
         
         # Retourner les résultats
         return {
-            "data": data,
+            "data": paginated_data,
             "total_pages": total_pages,
-            "total_count": filtered_total,
-            "is_filtered": len(conditions) > 0
+            "total_count": len(all_operators_data),
+            "is_filtered": len(conditions) > 0 or (limite_type and limite_type != 'none' and limite_valeur is not None)
         }
     except Exception as e:
         return {
@@ -325,7 +332,7 @@ def export_csv(
 ):
     if not check_csv_exists():
         return JSONResponse(
-            status_code=200,  # Utiliser 200 au lieu de 404 pour une meilleure expérience utilisateur
+            status_code=200,
             content={"message": "no_data"}
         )
     
@@ -336,6 +343,19 @@ def export_csv(
         # 1. Calculer d'abord le nombre total d'entrées (pour le pourcentage global)
         total_count_query = f"SELECT COUNT(*) as total FROM '{CSV_FILE_PATH}'"
         total_count = conn.execute(total_count_query).fetchone()[0]
+        
+        # Calculer le nombre total par opérateur (pour le pourcentage global)
+        operator_count_query = f"""
+            SELECT "Operateur" as operateur, COUNT(*) as count
+            FROM '{CSV_FILE_PATH}'
+            GROUP BY "Operateur"
+        """
+        operator_counts = {row[0]: row[1] for row in conn.execute(operator_count_query).fetchall()}
+        
+        # Calculer les pourcentages globaux pour tous les opérateurs (indépendamment des filtres)
+        global_percentages = {}
+        for operateur, count in operator_counts.items():
+            global_percentages[operateur] = round((count / total_count * 100), 2) if total_count > 0 else 0
         
         # 2. Construire la requête SQL pour les données filtrées
         base_query = f"SELECT * FROM '{CSV_FILE_PATH}'"
@@ -349,11 +369,15 @@ def export_csv(
         if fa_statut and fa_statut != 'all':
             conditions.append(f"\"2FA_STATUS\" = '{fa_statut}'")
         
+        # Correction du problème de date : ajouter un jour à date_max pour inclure la date sélectionnée
         if date_min:
             conditions.append(f"CREATED_DATE >= '{date_min}'")
         
         if date_max:
-            conditions.append(f"CREATED_DATE <= '{date_max}'")
+            # Ajouter un jour à date_max pour inclure la date sélectionnée
+            date_max_obj = datetime.strptime(date_max, "%Y-%m-%d")
+            date_max_plus_one = (date_max_obj + timedelta(days=1)).strftime("%Y-%m-%d")
+            conditions.append(f"CREATED_DATE < '{date_max_plus_one}'")
         
         if annee and annee != 'all':
             conditions.append(f"EXTRACT(YEAR FROM CREATED_DATE) = {annee}")
@@ -363,26 +387,70 @@ def export_csv(
         if conditions:
             filtered_query += " WHERE " + " AND ".join(conditions)
         
-        # 3. Calculer le nombre d'entrées filtrées par opérateur
-        result_query = f"""
-            SELECT 
-                "Operateur" as "Opérateur",
-                COUNT(*) as "Nombre d'IN",
-                ROUND(COUNT(*) * 100.0 / {total_count}, 2) as "Pourcentage IN (parc global)"
+        # 3. Compter le nombre d'entrées filtrées par opérateur
+        filtered_operator_query = f"""
+            SELECT "Operateur" as operateur, COUNT(*) as count
             FROM ({filtered_query}) as filtered_data
             GROUP BY "Operateur"
-            ORDER BY "Nombre d'IN" DESC
         """
+        filtered_operator_counts = {row[0]: row[1] for row in conn.execute(filtered_operator_query).fetchall()}
         
-        # Exécuter la requête
-        result = conn.execute(result_query).fetchall()
-        columns = ["Opérateur", "Nombre d'IN", "Pourcentage IN (parc global)"]
+        # 4. Compter le nombre total d'entrées filtrées
+        filtered_count_query = f"SELECT COUNT(*) as total FROM ({filtered_query}) as filtered_data"
+        filtered_total = conn.execute(filtered_count_query).fetchone()[0]
         
-        # Créer le CSV manuellement pour éviter de charger tout en mémoire
-        csv_content = ",".join(columns) + "\n"
+        # 5. Préparer les données pour tous les opérateurs qui ont des entrées après filtrage
+        all_operators_data = []
         
-        for row in result:
-            csv_content += f"{row[0]},{row[1]},{row[2]}\n"
+        for operateur, filtered_count in filtered_operator_counts.items():
+            # Récupérer le pourcentage global pour cet opérateur (calculé précédemment)
+            global_percentage = global_percentages.get(operateur, 0)
+            
+            # Calculer le pourcentage filtré (basé sur les données filtrées)
+            filtered_percentage = round((filtered_count / filtered_total * 100), 2) if filtered_total > 0 else 0
+            
+            all_operators_data.append({
+                "operateur": operateur,
+                "nombre_in": filtered_count,
+                "pourcentage_global": global_percentage,
+                "pourcentage_filtre": filtered_percentage
+            })
+        
+        # 6. Appliquer le filtre de limite si nécessaire
+        if limite_type and limite_type != 'none' and limite_valeur is not None:
+            filtered_data = []
+            for item in all_operators_data:
+                # Utiliser le pourcentage filtré pour la comparaison
+                percentage_to_check = item["pourcentage_filtre"]
+                
+                if limite_type == 'lt' and percentage_to_check < float(limite_valeur):
+                    filtered_data.append(item)
+                elif limite_type == 'gt' and percentage_to_check > float(limite_valeur):
+                    filtered_data.append(item)
+            
+            all_operators_data = filtered_data
+        
+        # 7. Trier les données par nombre d'IN (filtré) décroissant
+        all_operators_data.sort(key=lambda x: x["nombre_in"], reverse=True)
+        
+        # Déterminer si des filtres sont appliqués
+        is_filtered = len(conditions) > 0 or (limite_type and limite_type != 'none' and limite_valeur is not None)
+        
+        # Préparer les en-têtes du CSV
+        if is_filtered:
+            headers = ["Opérateur", "Nombre d'IN", "% IN (parc global)", "% IN (filtré)"]
+        else:
+            headers = ["Opérateur", "Nombre d'IN", "% IN (parc global)"]
+        
+        # Créer le CSV manuellement
+        csv_content = ",".join(headers) + "\n"
+        
+        # Ajouter les données
+        for item in all_operators_data:
+            if is_filtered:
+                csv_content += f"{item['operateur']},{item['nombre_in']},{item['pourcentage_global']},{item['pourcentage_filtre']}\n"
+            else:
+                csv_content += f"{item['operateur']},{item['nombre_in']},{item['pourcentage_global']}\n"
         
         # Fermer la connexion
         conn.close()
@@ -393,91 +461,6 @@ def export_csv(
             media_type="text/csv"
         )
         response.headers["Content-Disposition"] = f"attachment; filename=export_resume_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-        
-        return response
-    except Exception as e:
-        return JSONResponse(
-            status_code=500,
-            content={"error": str(e)}
-        )
-
-@router.get("/csv/export-in-details")
-def export_in_details(
-    statut: Optional[str] = None,
-    fa_statut: Optional[str] = None,
-    limite_type: Optional[str] = None,
-    limite_valeur: Optional[float] = None,
-    date_min: Optional[str] = None,
-    date_max: Optional[str] = None,
-    annee: Optional[str] = None
-):
-    if not check_csv_exists():
-        return JSONResponse(
-            status_code=200,  # Utiliser 200 au lieu de 404 pour une meilleure expérience utilisateur
-            content={"message": "no_data"}
-        )
-    
-    try:
-        # Connexion à DuckDB avec une instance en mémoire pour de meilleures performances
-        conn = duckdb.connect(":memory:")
-        
-        # Construire la requête SQL optimisée
-        query = f"""
-            SELECT 
-                FIRST_NAME as "Prénom",
-                LAST_NAME as "Nom",
-                EMAIL as "Email",
-                TELEPHONE as "Téléphone",
-                INDICATIF as "Indicatif",
-                USER_STATUS as "Statut",
-                "2FA_STATUS" as "Statut 2FA",
-                CREATED_DATE as "Date de création",
-                "Operateur" as "Opérateur"
-            FROM '{CSV_FILE_PATH}'
-        """
-        
-        # Ajouter les conditions de filtrage
-        conditions = []
-        
-        if statut and statut != 'all':
-            conditions.append(f"USER_STATUS = '{statut}'")
-        
-        if fa_statut and fa_statut != 'all':
-            conditions.append(f"\"2FA_STATUS\" = '{fa_statut}'")
-        
-        if date_min:
-            conditions.append(f"CREATED_DATE >= '{date_min}'")
-        
-        if date_max:
-            conditions.append(f"CREATED_DATE <= '{date_max}'")
-        
-        if annee and annee != 'all':
-            conditions.append(f"EXTRACT(YEAR FROM CREATED_DATE) = {annee}")
-        
-        # Ajouter les conditions à la requête
-        if conditions:
-            query += " WHERE " + " AND ".join(conditions)
-        
-        # Exécuter la requête
-        result = conn.execute(query).fetchall()
-        columns = conn.execute(query).description
-        column_names = [col[0] for col in columns]
-        
-        # Créer le CSV manuellement pour éviter de charger tout en mémoire
-        csv_content = ",".join(column_names) + "\n"
-        
-        for row in result:
-            csv_content += ",".join([str(val) if val is not None else "" for val in row]) + "\n"
-        
-        # Fermer la connexion
-        conn.close()
-        
-        # Préparer la réponse
-        response = StreamingResponse(
-            iter([csv_content]),
-            media_type="text/csv"
-        )
-        response.headers["Content-Disposition"] = f"attachment; filename=export_details_in_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
         
         return response
     except Exception as e:

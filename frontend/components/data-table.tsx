@@ -9,7 +9,6 @@ import {
   Download,
   ChevronLeft,
   ChevronRight,
-  FileSpreadsheet,
   AlertCircle,
   Database,
   FilterX,
@@ -25,35 +24,16 @@ export function DataTable() {
   const searchParams = useSearchParams()
   const { data, isLoading, totalPages, message, isFiltered } = useData(page)
 
+  // Fonction pour exporter les données
   const handleExport = async () => {
     const params = new URLSearchParams(searchParams)
-    params.set("export", "true")
 
     try {
-      // Pour la démonstration, ouvrir une nouvelle fenêtre avec l'URL d'exportation
-      // Dans un environnement réel, cela téléchargera le fichier CSV
-      const exportUrl = `/api/csv/export?${params.toString()}`
+      // Ouvrir une nouvelle fenêtre avec l'URL d'exportation
+      const exportUrl = `http://localhost:8000/api/csv/export?${params.toString()}`
       window.open(exportUrl, "_blank")
-
-      console.log("Simulation: Exportation démarrée avec les paramètres:", params.toString())
     } catch (error) {
       console.error("Erreur lors de l'exportation:", error)
-    }
-  }
-
-  const handleExportInDetails = async () => {
-    const params = new URLSearchParams(searchParams)
-    params.set("export_details", "true")
-
-    try {
-      // Pour la démonstration, ouvrir une nouvelle fenêtre avec l'URL d'exportation
-      // Dans un environnement réel, cela téléchargera le fichier CSV
-      const exportUrl = `/api/csv/export-in-details?${params.toString()}`
-      window.open(exportUrl, "_blank")
-
-      console.log("Simulation: Exportation des détails IN démarrée avec les paramètres:", params.toString())
-    } catch (error) {
-      console.error("Erreur lors de l'exportation des détails IN:", error)
     }
   }
 
@@ -94,8 +74,11 @@ export function DataTable() {
   }
 
   // Fonction pour afficher l'indicateur de variation
-  const renderVariationIndicator = (variation) => {
+  const renderVariationIndicator = (global, filtered) => {
     if (!isFiltered) return null
+
+    // Calculer la variation
+    const variation = filtered - global
 
     // Arrondir à 2 décimales
     const roundedVariation = Math.round(variation * 100) / 100
@@ -167,15 +150,6 @@ export function DataTable() {
         </div>
         <div className="flex gap-2">
           <Button
-            onClick={handleExportInDetails}
-            variant="outline"
-            className="flex items-center gap-2"
-            disabled={noData || data.length === 0}
-          >
-            <FileSpreadsheet className="h-4 w-4" />
-            Exporter détails IN
-          </Button>
-          <Button
             onClick={handleExport}
             variant="outline"
             className="flex items-center gap-2"
@@ -192,19 +166,24 @@ export function DataTable() {
           <TableHeader>
             <TableRow>
               <TableHead className="w-[200px]">Opérateur</TableHead>
-              <TableHead>Nombre d'IN</TableHead>
               <TableHead>
-                % IN (parc global)
+                Nombre d'IN
                 {isFiltered && (
-                  <Badge variant="outline" className="ml-2 font-normal">
-                    Global
+                  <Badge variant="outline" className="ml-2 font-normal bg-blue-50 text-blue-700 border-blue-200">
+                    Filtré
                   </Badge>
                 )}
               </TableHead>
+              <TableHead>
+                % IN
+                <Badge variant="outline" className="ml-2 font-normal bg-green-50 text-green-700 border-green-200">
+                  Global
+                </Badge>
+              </TableHead>
               {isFiltered && (
                 <TableHead>
-                  % IN (filtré)
-                  <Badge variant="outline" className="ml-2 font-normal">
+                  % IN
+                  <Badge variant="outline" className="ml-2 font-normal bg-purple-50 text-purple-700 border-purple-200">
                     Filtré
                   </Badge>
                 </TableHead>
@@ -228,7 +207,7 @@ export function DataTable() {
                     <AlertCircle className="h-12 w-12 text-muted-foreground mb-4" />
                     <h3 className="text-lg font-medium mb-2">Aucune donnée disponible</h3>
                     <p className="text-muted-foreground mb-4">
-                      Commencez par importer les fichiers pour visualiser les données.
+                      Commencez par importer un fichier CSV pour visualiser les données.
                     </p>
 
                     <Button
@@ -313,7 +292,8 @@ export function DataTable() {
                   <TableCell className="font-medium">{row.operateur}</TableCell>
                   <TableCell>{row.nombre_in}</TableCell>
                   <TableCell>
-                    {row.pourcentage_in}%{renderVariationIndicator(row.variation)}
+                    {row.pourcentage_in}%
+                    {isFiltered && renderVariationIndicator(row.pourcentage_in, row.pourcentage_filtre)}
                   </TableCell>
                   {isFiltered && <TableCell>{row.pourcentage_filtre}%</TableCell>}
                 </TableRow>
