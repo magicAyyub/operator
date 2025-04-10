@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { ImportDialog } from "@/components/import-dialog"
+import { NotificationsDropdown } from "@/components/notifications-dropdown"
 import { checkFileExists } from "@/lib/data"
 
 export function ActionBar() {
@@ -23,6 +24,7 @@ export function ActionBar() {
       <div className="container mx-auto py-3 flex items-center justify-between">
         <div></div> {/* Espace vide pour l'alignement */}
         <div className="flex gap-2">
+          <NotificationsDropdown />
           <ImportDialog fileExists={fileExists} />
         </div>
       </div>

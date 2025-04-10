@@ -29,14 +29,16 @@ import {
   Database,
   Loader2,
   FileText,
-  Server,
+  Upload,
   Cog,
   CheckCheck,
   Info,
+  Trash2,
+  Server,
 } from "lucide-react"
 import { purgeData } from "@/lib/data"
 import { useToast } from "@/hooks/use-toast"
-import { Checkbox } from "@/components/ui/checkbox"
+import { addNotification } from "@/lib/notifications"
 
 // Configure this to match your backend URL
 const BACKEND_URL = "http://localhost:8000"
@@ -52,7 +54,6 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
   // États pour les fichiers
   const [dataFile, setDataFile] = useState<File | null>(null)
   const [mappingFile, setMappingFile] = useState<File | null>(null)
-  const [appendMode, setAppendMode] = useState(true)
 
   // États pour le chargement et les résultats
   const [isLoading, setIsLoading] = useState(false)
@@ -164,7 +165,8 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
       // Ajouter le fichier de mapping au formData
       formData.append("mappingFile", mappingFile)
 
-      // Ajouter le mode d'ajout au formData
+      // Ajouter le mode d'ajout au formData (toujours true si fileExists est true)
+      const appendMode = fileExists
       formData.append("appendMode", appendMode.toString())
 
       setLoadMessage("Préparation des fichiers...")
@@ -209,14 +211,27 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
 
         // Construire un message qui inclut les informations sur les doublons
         let successMessage = data.message || "Traitement terminé avec succès"
+        let duplicatesFound = 0
+
         if (data.duplicates_info && data.duplicates_info.duplicates_found > 0) {
-          successMessage += ` (${data.duplicates_info.duplicates_found} doublons détectés et ignorés)`
+          duplicatesFound = data.duplicates_info.duplicates_found
+          successMessage += ` (${duplicatesFound} doublons détectés et ignorés)`
         }
 
         setResult({
           success: data.success,
           message: successMessage,
           details: mockDetails,
+        })
+
+        // Ajouter une notification
+        addNotification({
+          fileName: dataFile.name,
+          mappingFileName: mappingFile.name,
+          rowsProcessed: data.rows_processed || 0,
+          totalRows: data.total_rows || 0,
+          duplicatesFound: duplicatesFound,
+          type: appendMode ? "append" : "upload",
         })
       } catch (fetchError) {
         if (fetchError.name === "AbortError") {
@@ -299,6 +314,16 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
     setIsPurging(true)
     try {
       await purgeData()
+
+      // Ajouter une notification pour la purge
+      addNotification({
+        fileName: "Toutes les données",
+        mappingFileName: "",
+        rowsProcessed: 0,
+        totalRows: 0,
+        type: "purge",
+      })
+
       toast({
         title: "Succès",
         description: "Les données ont été purgées avec succès",
@@ -327,7 +352,6 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
     setLoadProgress(0)
     setLoadMessage("")
     setProcessingStep(0)
-    setAppendMode(true)
   }
 
   return (
@@ -347,7 +371,7 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
         </DialogTrigger>
         <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Charger ou ajouter des données</DialogTitle>
+            <DialogTitle>Charger des données</DialogTitle>
             <DialogDescription>Importez un fichier TXT et le fichier de correspondance MAJNUM.csv</DialogDescription>
           </DialogHeader>
 
@@ -358,19 +382,9 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
                 <div>
                   <p className="font-medium">Des données existent déjà</p>
                   <p className="text-sm mt-1">
-                    Vous pouvez ajouter ces nouvelles données aux données existantes ou purger les données existantes
-                    avant d'importer.
+                    Les nouvelles données seront ajoutées aux données existantes. Si vous souhaitez remplacer
+                    complètement les données, vous pouvez d'abord purger les données existantes.
                   </p>
-                  <div className="flex items-center space-x-2 mt-3">
-                    <Checkbox
-                      id="append-mode"
-                      checked={appendMode}
-                      onCheckedChange={(checked) => setAppendMode(checked === true)}
-                    />
-                    <label htmlFor="append-mode" className="text-sm font-medium leading-none">
-                      Ajouter aux données existantes
-                    </label>
-                  </div>
                   <Button
                     variant="outline"
                     size="sm"
@@ -379,6 +393,7 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
                       setIsPurgeOpen(true)
                     }}
                   >
+                    <Trash2 className="h-4 w-4 mr-2 text-red-500" />
                     Purger les données existantes
                   </Button>
                 </div>
@@ -524,7 +539,7 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
                 <div className="relative mb-4">
                   <Server className="h-10 w-10 text-primary animate-pulse" />
                 </div>
-                <p className="font-medium text-lg mb-3">Chargement dans la base de données</p>
+                <p className="font-medium text-lg mb-3">Finalisation du traitement</p>
 
                 {/* Progress bar with animation */}
                 <div className="w-full max-w-xs mx-auto mb-4">
@@ -608,7 +623,7 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
                   )}
                   <div>
                     <h3 className={`text-lg font-medium ${dbResult.success ? "text-blue-800" : "text-red-800"}`}>
-                      {dbResult.success ? "Base de données mise à jour" : "Erreur de chargement"}
+                      {dbResult.success ? "Traitement terminé" : "Erreur de traitement"}
                     </h3>
                     <p className={`text-sm ${dbResult.success ? "text-blue-600" : "text-red-600"}`}>
                       {dbResult.message}
@@ -635,20 +650,16 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
                   <Button variant="outline" onClick={() => setOpen(false)}>
                     Annuler
                   </Button>
-                  <Button
-                    onClick={handleImport}
-                    disabled={isLoading || !dataFile || !mappingFile || (fileExists && !appendMode)}
-                    className="gap-2"
-                  >
+                  <Button onClick={handleImport} disabled={isLoading || !dataFile || !mappingFile} className="gap-2">
                     {isLoading ? (
                       <>
                         <Loader2 className="h-4 w-4 animate-spin" />
-                        {fileExists && appendMode ? "Ajout en cours..." : "Extraction en cours..."}
+                        Traitement en cours...
                       </>
                     ) : (
                       <>
-                        <Cog className="h-4 w-4" />
-                        {fileExists && appendMode ? "Ajouter les données" : "Extraire les données"}
+                        <Upload className="h-4 w-4" />
+                        Traiter le fichier
                       </>
                     )}
                   </Button>
@@ -667,12 +678,12 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
                     {isLoadingToDb ? (
                       <>
                         <Loader2 className="h-4 w-4 animate-spin" />
-                        Chargement...
+                        Finalisation...
                       </>
                     ) : (
                       <>
-                        <Server className="h-4 w-4" />
-                        Charger dans la base de données
+                        <CheckCheck className="h-4 w-4" />
+                        Terminer
                       </>
                     )}
                   </Button>
