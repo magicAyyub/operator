@@ -6,9 +6,9 @@ class Config:
     # Dynamically determine the executable path based on platform
     EXECUTABLE_DIR = BASE_ROOT + "executables/"
     
-    EXECUTABLE_NAME = "data_processor"
+    # EXECUTABLE_NAME = "data_processor"
     # For Mac
-    # EXECUTABLE_NAME = "data_processor_linux_arm"
+    EXECUTABLE_NAME = "data_processor_linux_arm"
     
     # Full path to the executable
     C_EXECUTABLE_PATH = EXECUTABLE_DIR + EXECUTABLE_NAME

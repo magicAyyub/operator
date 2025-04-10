@@ -28,14 +28,15 @@ import {
   FileUp,
   Database,
   Loader2,
-  AlertTriangle,
   FileText,
   Server,
   Cog,
   CheckCheck,
+  Info,
 } from "lucide-react"
 import { purgeData } from "@/lib/data"
 import { useToast } from "@/hooks/use-toast"
+import { Checkbox } from "@/components/ui/checkbox"
 
 // Configure this to match your backend URL
 const BACKEND_URL = "http://localhost:8000"
@@ -49,8 +50,9 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
   const [isPurgeOpen, setIsPurgeOpen] = useState(false)
 
   // États pour les fichiers
-  const [dataFiles, setDataFiles] = useState<File[]>([])
+  const [dataFile, setDataFile] = useState<File | null>(null)
   const [mappingFile, setMappingFile] = useState<File | null>(null)
+  const [appendMode, setAppendMode] = useState(true)
 
   // États pour le chargement et les résultats
   const [isLoading, setIsLoading] = useState(false)
@@ -74,11 +76,11 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
   const dataInputRef = useRef<HTMLInputElement>(null)
   const mappingInputRef = useRef<HTMLInputElement>(null)
 
-  const handleDataFilesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      const files = Array.from(e.target.files)
-      console.log("Selected data files:", files)
-      setDataFiles(files)
+  const handleDataFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0]
+      console.log("Selected data file:", file)
+      setDataFile(file)
     }
   }
 
@@ -108,10 +110,18 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
 
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       if (type === "data") {
-        // Filter to only accept .txt files
-        const txtFiles = Array.from(e.dataTransfer.files).filter((file) => file.name.toLowerCase().endsWith(".txt"))
-        console.log("Dropped data files:", txtFiles)
-        setDataFiles(txtFiles)
+        // Accept only .txt files
+        const file = e.dataTransfer.files[0]
+        if (file.name.toLowerCase().endsWith(".txt")) {
+          console.log("Dropped data file:", file)
+          setDataFile(file)
+        } else {
+          toast({
+            title: "Format non supporté",
+            description: "Veuillez sélectionner un fichier TXT pour les données",
+            variant: "destructive",
+          })
+        }
       } else if (type === "mapping") {
         // Only accept .csv files for mapping
         const file = e.dataTransfer.files[0]
@@ -130,7 +140,7 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
   }
 
   const handleImport = async () => {
-    if (dataFiles.length === 0 || !mappingFile) {
+    if (!dataFile || !mappingFile) {
       setResult({
         success: false,
         message: "Veuillez sélectionner tous les fichiers requis",
@@ -148,53 +158,68 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
     try {
       const formData = new FormData()
 
-      // Ajouter les fichiers TXT au formData
-      dataFiles.forEach((file) => {
-        formData.append("dataFiles", file)
-      })
+      // Ajouter le fichier TXT au formData
+      formData.append("dataFiles", dataFile)
 
       // Ajouter le fichier de mapping au formData
       formData.append("mappingFile", mappingFile)
 
+      // Ajouter le mode d'ajout au formData
+      formData.append("appendMode", appendMode.toString())
+
       setLoadMessage("Préparation des fichiers...")
       await new Promise((resolve) => setTimeout(resolve, 500))
 
-      // Traiter chaque fichier
-      for (let i = 0; i < dataFiles.length; i++) {
-        const file = dataFiles[i]
-        setCurrentFile(file.name)
-        setProcessingStep(i + 1)
-        setLoadMessage(`Traitement du fichier ${file.name}...`)
-        await new Promise((resolve) => setTimeout(resolve, 800))
+      // Traiter le fichier
+      setCurrentFile(dataFile.name)
+      setProcessingStep(1)
+      setLoadMessage(`Traitement du fichier ${dataFile.name}...`)
+      await new Promise((resolve) => setTimeout(resolve, 800))
+
+      // Faire l'appel API avec un timeout
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000) // 5 minutes timeout
+
+      try {
+        const response = await fetch(`${BACKEND_URL}/api/process_files`, {
+          method: "POST",
+          body: formData,
+          signal: controller.signal,
+        })
+
+        clearTimeout(timeoutId)
+
+        if (!response.ok) {
+          const errorData = await response.json()
+          throw new Error(errorData.message || "Erreur lors de l'importation")
+        }
+
+        const data = await response.json()
+
+        // Simuler les fichiers traités pour l'interface
+        const mockDetails = [
+          {
+            filename: dataFile.name,
+            success: true,
+            output_file: dataFile.name,
+          },
+        ]
+
+        setProcessedFiles([dataFile.name])
+
+        setResult({
+          success: data.success,
+          message: data.message || "Traitement terminé avec succès",
+          details: mockDetails,
+        })
+      } catch (fetchError) {
+        if (fetchError.name === "AbortError") {
+          throw new Error("L'opération a pris trop de temps et a été interrompue. Essayez avec un fichier plus petit.")
+        }
+        throw fetchError
+      } finally {
+        clearTimeout(timeoutId)
       }
-
-      // Call the Python backend API
-      const response = await fetch(`${BACKEND_URL}/api/process_files`, {
-        method: "POST",
-        body: formData,
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.message || "Erreur lors de l'importation")
-      }
-
-      const data = await response.json()
-
-      // Simuler les fichiers traités pour l'interface
-      const mockDetails = dataFiles.map((file) => ({
-        filename: file.name,
-        success: true,
-        output_file: file.name,
-      }))
-
-      setProcessedFiles(mockDetails.map((d) => d.output_file))
-
-      setResult({
-        success: data.success,
-        message: data.message || "Traitement terminé avec succès",
-        details: mockDetails,
-      })
     } catch (error) {
       console.error("Import error:", error)
       setResult({
@@ -237,7 +262,7 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
       }
 
       // À ce stade, les données sont déjà chargées dans la base de données
-      // car l'API /api/csv/upload a déjà été appelée dans handleImport
+      // car l'API /api/process_files a déjà été appelée dans handleImport
 
       setDbResult({
         success: true,
@@ -287,7 +312,7 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
   }
 
   const resetForm = () => {
-    setDataFiles([])
+    setDataFile(null)
     setMappingFile(null)
     setResult(null)
     setDbResult(null)
@@ -296,6 +321,7 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
     setLoadProgress(0)
     setLoadMessage("")
     setProcessingStep(0)
+    setAppendMode(true)
   }
 
   return (
@@ -315,20 +341,30 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
         </DialogTrigger>
         <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Charger les données</DialogTitle>
-            <DialogDescription>Importez des fichiers TXT et le fichier de correspondance MAJNUM.csv</DialogDescription>
+            <DialogTitle>Charger ou ajouter des données</DialogTitle>
+            <DialogDescription>Importez un fichier TXT et le fichier de correspondance MAJNUM.csv</DialogDescription>
           </DialogHeader>
 
           <div className="grid gap-6 py-4">
             {fileExists && (
-              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-amber-800 flex items-start gap-3">
-                <AlertTriangle className="h-5 w-5 text-amber-500 mt-0.5" />
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-blue-800 flex items-start gap-3">
+                <Info className="h-5 w-5 text-blue-500 mt-0.5" />
                 <div>
-                  <p className="font-medium">Un fichier de données existe déjà</p>
+                  <p className="font-medium">Des données existent déjà</p>
                   <p className="text-sm mt-1">
-                    Vous devez purger les données existantes avant d'importer un nouveau fichier. Cela supprimera
-                    définitivement toutes les données actuelles.
+                    Vous pouvez ajouter ces nouvelles données aux données existantes ou purger les données existantes
+                    avant d'importer.
                   </p>
+                  <div className="flex items-center space-x-2 mt-3">
+                    <Checkbox
+                      id="append-mode"
+                      checked={appendMode}
+                      onCheckedChange={(checked) => setAppendMode(checked === true)}
+                    />
+                    <label htmlFor="append-mode" className="text-sm font-medium leading-none">
+                      Ajouter aux données existantes
+                    </label>
+                  </div>
                   <Button
                     variant="outline"
                     size="sm"
@@ -337,13 +373,13 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
                       setIsPurgeOpen(true)
                     }}
                   >
-                    Purger les données
+                    Purger les données existantes
                   </Button>
                 </div>
               </div>
             )}
 
-            {!isLoading && !result?.success && !fileExists && (
+            {!isLoading && !result?.success && (
               <>
                 <div className="grid gap-2">
                   <div
@@ -360,17 +396,17 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
                   >
                     <div className="flex flex-col items-center justify-center gap-2 text-center cursor-pointer">
                       <FileUp className="h-10 w-10 text-muted-foreground" />
-                      <h3 className="text-lg font-medium">Fichiers de données (TXT)</h3>
+                      <h3 className="text-lg font-medium">Fichier de données (TXT)</h3>
                       <p className="text-sm text-muted-foreground mb-2">
-                        Glissez-déposez vos fichiers TXT ici ou cliquez pour parcourir
+                        Glissez-déposez votre fichier TXT ici ou cliquez pour parcourir
                       </p>
                       <input
                         ref={dataInputRef}
-                        id="data-files"
+                        id="data-file"
                         type="file"
                         accept=".txt"
-                        multiple
-                        onChange={handleDataFilesChange}
+                        multiple={false}
+                        onChange={handleDataFileChange}
                         className="hidden"
                       />
                       <Button
@@ -382,15 +418,15 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
                           dataInputRef.current?.click()
                         }}
                       >
-                        Sélectionner des fichiers
+                        Sélectionner un fichier
                       </Button>
                     </div>
                   </div>
 
-                  {dataFiles.length > 0 && (
+                  {dataFile && (
                     <div className="text-sm text-muted-foreground flex items-center gap-2 p-2 bg-muted/50 rounded">
                       <FileText className="h-4 w-4" />
-                      {dataFiles.length} fichier(s) sélectionné(s): {dataFiles.map((f) => f.name).join(", ")}
+                      Fichier sélectionné: {dataFile.name}
                     </div>
                   )}
                 </div>
@@ -461,7 +497,7 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
                     <div
                       className="h-full bg-primary rounded-full transition-all duration-500 ease-in-out"
                       style={{
-                        width: `${processingStep > 0 ? (processingStep / (dataFiles.length * 3 + 2)) * 100 : 0}%`,
+                        width: `${processingStep > 0 ? (processingStep / (1 * 3 + 2)) * 100 : 0}%`,
                       }}
                     ></div>
                   </div>
@@ -519,7 +555,7 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
                       {result.success ? "Traitement terminé avec succès" : "Erreur de traitement"}
                     </h3>
                     <p className={`text-sm ${result.success ? "text-green-600" : "text-red-600"}`}>
-                      {result.success ? `${dataFiles.length} fichier(s) traité(s) avec succès` : result.message}
+                      {result.success ? `1 fichier traité avec succès` : result.message}
                     </p>
                   </div>
                 </div>
@@ -595,18 +631,18 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
                   </Button>
                   <Button
                     onClick={handleImport}
-                    disabled={isLoading || dataFiles.length === 0 || !mappingFile || fileExists}
+                    disabled={isLoading || !dataFile || !mappingFile || (fileExists && !appendMode)}
                     className="gap-2"
                   >
                     {isLoading ? (
                       <>
                         <Loader2 className="h-4 w-4 animate-spin" />
-                        Extraction en cours...
+                        {fileExists && appendMode ? "Ajout en cours..." : "Extraction en cours..."}
                       </>
                     ) : (
                       <>
                         <Cog className="h-4 w-4" />
-                        Extraire les données
+                        {fileExists && appendMode ? "Ajouter les données" : "Extraire les données"}
                       </>
                     )}
                   </Button>

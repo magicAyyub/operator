@@ -1,7 +1,7 @@
 import os
-from fastapi import APIRouter, UploadFile, File, HTTPException, status
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, status
 from fastapi.responses import JSONResponse
-from typing import List
+from typing import List, Optional
 import subprocess
 from pathlib import Path
 import traceback
@@ -27,6 +27,9 @@ router = APIRouter(
     responses={404: {"description": "Not found"}}
 )
 
+# Chemin vers le fichier CSV
+CSV_FILE_PATH = "src/data/input.csv"
+
 def is_wsl() -> bool:
     """Check if running in WSL environment"""
     return 'microsoft' in platform.uname().release.lower()
@@ -42,10 +45,8 @@ def get_executable_command(executable_path: Path) -> list:
 
 async def process_single_file(
     file: UploadFile,
-    idx: int,
-    total_files: int,
-    upload_dir: Path,
     mapping_path: Path,
+    upload_dir: Path,
     executable_cmd: list
 ) -> dict:
     """Process a single file and return result dictionary"""
@@ -53,7 +54,8 @@ async def process_single_file(
         'filename': file.filename,
         'success': False,
         'error': None,
-        'processing_time': None
+        'processing_time': None,
+        'output_file': None
     }
     start_time = datetime.now()
     
@@ -72,12 +74,12 @@ async def process_single_file(
         logger.info(f"Executing: {' '.join(cmd)}")
 
         try:
-            # Increased timeout to 10 minutes (600 seconds)
+            # Increased timeout to 5 minutes (300 seconds)
             process = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=600
+                timeout=300
             )
 
             # Check process results
@@ -93,11 +95,11 @@ async def process_single_file(
                 return file_result
 
             file_result['success'] = True
-            file_result['output_file'] = Path(processed_output).name
+            file_result['output_file'] = processed_output
             return file_result
 
         except subprocess.TimeoutExpired:
-            file_result['error'] = "Processing timed out after 10 minutes"
+            file_result['error'] = "Processing timed out after 5 minutes"
         except subprocess.CalledProcessError as e:
             file_result['error'] = f"Processing failed: {str(e)}"
         except Exception as e:
@@ -113,7 +115,7 @@ async def process_single_file(
             input_path.unlink()
         if 'output_path' in locals() and output_path.exists():
             output_path.unlink()
-        
+      
     return file_result
 
 def clean_error_message(error_msg: str) -> str:
@@ -136,7 +138,7 @@ async def save_upload_file_chunked(upload_file: UploadFile, destination: Path) -
                 buffer.write(chunk)
                 # Allow other tasks to run between chunks
                 await asyncio.sleep(0)
-                
+              
         return True
     except Exception as e:
         logger.error(f"Error saving file {upload_file.filename}: {str(e)}")
@@ -144,10 +146,11 @@ async def save_upload_file_chunked(upload_file: UploadFile, destination: Path) -
 
 @router.post("/process_files", response_model=dict)
 async def process_files_endpoint(
-    dataFiles: List[UploadFile] = File(...),
-    mappingFile: UploadFile = File(...)
+    dataFiles: UploadFile = File(...),
+    mappingFile: UploadFile = File(...),
+    appendMode: Optional[str] = Form("false")
 ):
-    """Endpoint for processing multiple data files with a mapping file"""
+    """Endpoint for processing a single data file with a mapping file and appending to existing data"""
     start_time = datetime.now()
     logger.info(f"Process files endpoint called at {start_time}")
 
@@ -155,22 +158,25 @@ async def process_files_endpoint(
     if not dataFiles:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No data files provided"
+            detail="No data file provided"
         )
 
     # Validate file extensions
-    for file in dataFiles:
-        if not file.filename.lower().endswith('.txt'):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f'Invalid file format for {file.filename}. Only .txt files allowed.'
-            )
+    if not dataFiles.filename.lower().endswith('.txt'):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f'Invalid file format for {dataFiles.filename}. Only .txt files allowed.'
+        )
 
     if not mappingFile.filename.lower().endswith('.csv'):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail='Invalid mapping file format. Only .csv files allowed.'
         )
+
+    # Convert appendMode string to boolean
+    append_mode = appendMode.lower() == "true"
+    logger.info(f"Append mode: {append_mode}")
 
     # Setup working directory
     upload_dir = Path(Config.UPLOAD_FOLDER)
@@ -196,145 +202,115 @@ async def process_files_endpoint(
     executable_cmd = get_executable_command(c_executable)
     logger.info(f"Using command: {executable_cmd}")
 
-    # Process files
-    results = []
-    combined_df = None
+    # Process the file
+    result = await process_single_file(
+        file=dataFiles,
+        mapping_path=mapping_path,
+        upload_dir=upload_dir,
+        executable_cmd=executable_cmd
+    )
+    
+    logger.info(f"File processing result: {result}")
 
-    # Process files with progress logging
-    for idx, file in enumerate(dataFiles, 1):
-        logger.info(f"Processing file {idx}/{len(dataFiles)}: {file.filename}")
-        result = await process_single_file(
-            file=file,
-            idx=idx,
-            total_files=len(dataFiles),
-            upload_dir=upload_dir,
-            mapping_path=mapping_path,
-            executable_cmd=executable_cmd
+    if not result['success']:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to process file: {result['error']}"
         )
-        results.append(result)
-        logger.info(f"Completed file {idx}/{len(dataFiles)}: {file.filename} - Success: {result['success']}")
 
-        # If successful, add to combined output
-        if result['success']:
-            try:
-                output_path = upload_dir / result['output_file']
-                # Use low_memory=False to avoid DtypeWarning for mixed types
-                file_df = pd.read_csv(output_path, low_memory=False)
-                
-                # Log dataframe size for debugging
-                logger.info(f"File {file.filename} produced {len(file_df)} rows")
-                
-                # Combine dataframes
-                if combined_df is not None:
-                    combined_df = pd.concat([combined_df, file_df], ignore_index=True)
-                    logger.info(f"Combined dataframe now has {len(combined_df)} rows")
-                else:
-                    combined_df = file_df
-                    logger.info(f"Started combined dataframe with {len(combined_df)} rows")
-                
-                # Allow other tasks to run between file processing
-                await asyncio.sleep(0)
-                
-            except Exception as e:
-                logger.error(f"Error combining output for {file.filename}: {str(e)}")
-                result['success'] = False
-                result['error'] = f"Output combination failed: {str(e)}"
-
-    # Save combined output
-    combined_output_path = upload_dir / 'input.csv'
-    if combined_df is not None and not combined_df.empty:
-        try:
-            logger.info(f"Saving combined output with {len(combined_df)} rows to {combined_output_path}")
-            # Use chunks for large dataframes
-            if len(combined_df) > 100000:  # If more than 100k rows
-                logger.info("Large dataframe detected, using chunked CSV writing")
-                # Write in chunks to avoid memory issues
-                chunk_size = 50000
-                for i in range(0, len(combined_df), chunk_size):
-                    mode = 'w' if i == 0 else 'a'
-                    header = i == 0
-                    chunk = combined_df.iloc[i:i+chunk_size]
-                    chunk.to_csv(combined_output_path, mode=mode, header=header, index=False)
-                    logger.info(f"Wrote chunk {i//chunk_size + 1} with {len(chunk)} rows")
-                    await asyncio.sleep(0)  # Allow other tasks to run between chunks
-            else:
-                combined_df.to_csv(combined_output_path, index=False)
-                
-            logger.info(f"Successfully saved combined output to {combined_output_path}")
-        except Exception as e:
-            logger.error(f"Failed to save combined output: {str(e)}")
-            traceback.print_exc()
-
-    # Clean all files in upload_dir except combined output (input.csv)
-    for file in upload_dir.iterdir():
-        if file != combined_output_path:
-            try:
-                file.unlink()
-                logger.debug(f"Deleted temporary file: {file}")
-            except Exception as e:
-                logger.error(f"Failed to delete temporary file {file}: {str(e)}")
-
-    # Prepare response
-    success_count = sum(1 for r in results if r['success'])
-    processing_time = str(datetime.now() - start_time)
-
-    response_data = {
-        'success': success_count > 0,
-        'files_processed': success_count,
-        'total_files': len(dataFiles),
-        'processing_time': processing_time,
-        'details': results,
-        'combined_output': 'input.csv' if combined_df is not None else None,
-        'environment': {
-            'system': platform.system(),
-            'release': platform.release(),
-            'is_wsl': is_wsl(),
-            'executable': str(c_executable),
-            'command_used': ' '.join(executable_cmd),
-        }
-    }
-
-    logger.info(f"Processing completed in {processing_time}. Success: {success_count}/{len(dataFiles)}")
-    return JSONResponse(content=response_data)
-
-# Ajouter un endpoint pour l'upload direct de CSV (pour la compatibilité avec l'interface Next.js)
-@router.post("/csv/upload", response_model=dict)
-async def upload_csv_endpoint(
-    file: UploadFile = File(...)
-):
-    """Endpoint pour télécharger directement un fichier CSV"""
+    # Handle the processed output
     try:
-        # Vérifier que c'est un fichier CSV
-        if not file.filename.lower().endswith('.csv'):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Le fichier doit être au format CSV"
-            )
-        
-        # Créer le répertoire de données s'il n'existe pas
-        data_dir = Path("src/data")
+        # Path to the combined output file
+        combined_output_path = Path(CSV_FILE_PATH)
+        data_dir = combined_output_path.parent
         data_dir.mkdir(exist_ok=True, parents=True)
         
-        # Chemin du fichier de destination
-        file_path = data_dir / "input.csv"
+        # Path to the processed output file
+        processed_output_path = Path(result['output_file'])
         
-        # Sauvegarder le fichier avec chunking
-        if not await save_upload_file_chunked(file, file_path):
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Erreur lors de la sauvegarde du fichier"
-            )
+        # Read the processed data
+        processed_df = pd.read_csv(processed_output_path, low_memory=False)
+        logger.info(f"Processed file has {len(processed_df)} rows")
+        
+        if append_mode and combined_output_path.exists():
+            # If appending and the file exists, read existing data and append
+            logger.info(f"Appending to existing file: {combined_output_path}")
+            try:
+                existing_df = pd.read_csv(combined_output_path, low_memory=False)
+                logger.info(f"Existing file has {len(existing_df)} rows")
+                
+                # Combine dataframes
+                combined_df = pd.concat([existing_df, processed_df], ignore_index=True)
+                logger.info(f"Combined dataframe has {len(combined_df)} rows")
+            except Exception as e:
+                logger.error(f"Error reading existing file: {e}")
+                # If there's an error reading the existing file, just use the processed data
+                combined_df = processed_df
+        else:
+            # If not appending or the file doesn't exist, just use the processed data
+            combined_df = processed_df
+        
+        # Save the combined data
+        logger.info(f"Saving combined data with {len(combined_df)} rows to {combined_output_path}")
+        
+        # Use chunks for large dataframes
+        if len(combined_df) > 50000:  # If more than 50k rows
+            logger.info("Large dataframe detected, using chunked CSV writing")
+            # Write in chunks to avoid memory issues
+            chunk_size = 10000
+            for i in range(0, len(combined_df), chunk_size):
+                mode = 'w' if i == 0 else 'a'
+                header = i == 0
+                chunk = combined_df.iloc[i:i+chunk_size]
+                chunk.to_csv(combined_output_path, mode=mode, header=header, index=False)
+                logger.info(f"Wrote chunk {i//chunk_size + 1} with {len(chunk)} rows")
+                await asyncio.sleep(0)  # Allow other tasks to run between chunks
+        else:
+            combined_df.to_csv(combined_output_path, index=False)
+        
+        logger.info(f"Successfully saved combined data to {combined_output_path}")
+        
+        # Clean up temporary files
+        for file_path in upload_dir.iterdir():
+            if file_path != combined_output_path and file_path.is_file():
+                try:
+                    file_path.unlink()
+                    logger.debug(f"Deleted temporary file: {file_path}")
+                except Exception as e:
+                    logger.error(f"Failed to delete temporary file {file_path}: {str(e)}")
         
         return {
             "success": True,
-            "message": "Fichier CSV importé avec succès"
+            "message": f"File processed and {'added to' if append_mode else 'saved as'} input.csv",
+            "rows_processed": len(processed_df),
+            "total_rows": len(combined_df)
         }
-    except HTTPException:
-        raise
+        
     except Exception as e:
-        logger.error(f"Erreur lors de l'upload du CSV: {str(e)}")
+        logger.error(f"Error handling processed output: {e}")
         traceback.print_exc()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Une erreur est survenue lors de l'importation du fichier: {str(e)}"
+            detail=f"Error handling processed output: {str(e)}"
+        )
+
+@router.get("/csv/check")
+def check_file():
+    """Vérifie si un fichier de données existe déjà"""
+    exists = os.path.exists(CSV_FILE_PATH)
+    return {"exists": exists}
+
+@router.delete("/csv/purge")
+def purge_data():
+    """Supprime le fichier de données existant"""
+    try:
+        if os.path.exists(CSV_FILE_PATH):
+            os.remove(CSV_FILE_PATH)
+            return {"success": True, "message": "Données purgées avec succès"}
+        else:
+            return {"success": True, "message": "Aucun fichier à purger"}
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "message": f"Erreur lors de la purge des données: {str(e)}"}
         )
