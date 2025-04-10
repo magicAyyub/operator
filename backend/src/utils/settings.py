@@ -9,10 +9,15 @@ class Config:
     # Dynamically determine the executable path based on platform
     EXECUTABLE_DIR = BASE_ROOT + "executables/"
     
-    # For Windows and Linux
-    # EXECUTABLE_NAME = "data_processor.exe" if platform.system() == "Windows" else "data_processor"
-    # for mac
-    EXECUTABLE_NAME = "data_processor.exe" if platform.system() == "Windows" else "data_processor_linux_arm"
+    # Set executable name based on platform
+    if platform.system() == "Windows":
+        EXECUTABLE_NAME = "data_processor.exe"
+    elif platform.system() == "Darwin" and platform.machine() == "arm64":
+        EXECUTABLE_NAME = "data_processor_mac_arm"
+    elif platform.system() == "Linux":
+        EXECUTABLE_NAME = "data_processor_linux_arm"
+    else:
+        EXECUTABLE_NAME = "data_processor"
     
     # Full path to the executable
     C_EXECUTABLE_PATH = EXECUTABLE_DIR + EXECUTABLE_NAME
