@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
 import { useSearchParams } from "next/navigation"
@@ -18,11 +18,13 @@ import {
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { useToast } from "@/hooks/use-toast"
 
 export function DataTable() {
   const [page, setPage] = useState(1)
   const searchParams = useSearchParams()
   const { data, isLoading, totalPages, message, isFiltered } = useData(page)
+  const { toast } = useToast()
 
   // Fonction pour exporter les données
   const handleExport = async () => {
@@ -142,6 +144,22 @@ export function DataTable() {
   const formatNumber = (num) => {
     return new Intl.NumberFormat("fr-FR").format(num)
   }
+  // pour vérifier si des données ont été chargées après un rechargement
+  useEffect(() => {
+    // Vérifier si nous venons de charger des données (après un rechargement)
+    const justLoaded = sessionStorage.getItem("justLoadedData")
+    if (justLoaded) {
+      // Supprimer le marqueur
+      sessionStorage.removeItem("justLoadedData")
+
+      // Afficher une notification de succès
+      toast({
+        title: "Données chargées avec succès",
+        description: "Les données ont été importées et sont maintenant visibles dans le tableau.",
+        variant: "default",
+      })
+    }
+  }, [])
 
   return (
     <div className="space-y-4">

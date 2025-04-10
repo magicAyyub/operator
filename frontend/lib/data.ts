@@ -3,6 +3,7 @@ const BASE_URL = "http://localhost:8000"
 const API_URL = `${BASE_URL}/api/csv`
 const PAGE_SIZE = 10
 
+
 // Fonction utilitaire pour les requêtes avec timeout
 async function fetchWithTimeout(url: string, options = {}, timeout = 10000) {
   const controller = new AbortController()
@@ -99,6 +100,39 @@ export async function uploadCSV(file: File) {
     if (!response.ok) {
       const errorData = await response.json()
       throw new Error(errorData.message || "Erreur lors du téléchargement du fichier CSV")
+    }
+
+    return await response.json()
+  } catch (error) {
+    console.error("Erreur:", error)
+    throw error
+  }
+}
+
+export async function checkFileExists() {
+  try {
+    const response = await fetchWithTimeout(`${API_URL}/check`)
+
+    if (!response.ok) {
+      throw new Error("Erreur lors de la vérification du fichier")
+    }
+
+    const data = await response.json()
+    return data.exists
+  } catch (error) {
+    console.error("Erreur:", error)
+    return false
+  }
+}
+
+export async function purgeData() {
+  try {
+    const response = await fetchWithTimeout(`${API_URL}/purge`, {
+      method: "DELETE",
+    })
+
+    if (!response.ok) {
+      throw new Error("Erreur lors de la purge des données")
     }
 
     return await response.json()

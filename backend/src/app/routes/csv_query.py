@@ -476,3 +476,24 @@ def export_csv(
             status_code=500,
             content={"error": str(e)}
         )
+
+@router.get("/csv/check")
+def check_file():
+    """Vérifie si un fichier de données existe déjà"""
+    exists = os.path.exists(CSV_FILE_PATH)
+    return {"exists": exists}
+
+@router.delete("/csv/purge")
+def purge_data():
+    """Supprime le fichier de données existant"""
+    try:
+        if os.path.exists(CSV_FILE_PATH):
+            os.remove(CSV_FILE_PATH)
+            return {"success": True, "message": "Données purgées avec succès"}
+        else:
+            return {"success": True, "message": "Aucun fichier à purger"}
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "message": f"Erreur lors de la purge des données: {str(e)}"}
+        )

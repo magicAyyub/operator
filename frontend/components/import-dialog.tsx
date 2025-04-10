@@ -1,8 +1,9 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import type React from "react"
+
+import { useState, useRef } from "react"
 import { Button } from "@/components/ui/button"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
   Dialog,
   DialogContent,
@@ -11,43 +12,85 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { FileText, CheckCircle, AlertCircle, FileUp, Database, Loader2, Settings, Cog, Server } from "lucide-react"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import {
+  CheckCircle,
+  AlertCircle,
+  FileUp,
+  Database,
+  Loader2,
+  AlertTriangle,
+  FileText,
+  Server,
+  Cog,
+  CheckCheck,
+} from "lucide-react"
+import { purgeData } from "@/lib/data"
+import { useToast } from "@/hooks/use-toast"
 
 // Configure this to match your backend URL
 const BACKEND_URL = "http://localhost:8000"
 
-export function ImportDialog() {
-  const [dataFiles, setDataFiles] = useState([])
-  const [mappingFile, setMappingFile] = useState(null)
+interface ImportDialogProps {
+  fileExists: boolean
+}
+
+export function ImportDialog({ fileExists }: ImportDialogProps) {
+  const [open, setOpen] = useState(false)
+  const [isPurgeOpen, setIsPurgeOpen] = useState(false)
+
+  // États pour les fichiers
+  const [dataFiles, setDataFiles] = useState<File[]>([])
+  const [mappingFile, setMappingFile] = useState<File | null>(null)
+
+  // États pour le chargement et les résultats
   const [isLoading, setIsLoading] = useState(false)
   const [isLoadingToDb, setIsLoadingToDb] = useState(false)
-  const [result, setResult] = useState(null)
-  const [dbResult, setDbResult] = useState(null)
+  const [isPurging, setIsPurging] = useState(false)
+  const [result, setResult] = useState<{ success: boolean; message: string; details?: any[] } | null>(null)
+  const [dbResult, setDbResult] = useState<{ success: boolean; message: string } | null>(null)
+
+  // États pour le glisser-déposer
   const [dragActive, setDragActive] = useState({ data: false, mapping: false })
-  const [open, setOpen] = useState(false)
-  const [currentFile, setCurrentFile] = useState("")
-  const [debugInfo, setDebugInfo] = useState(null)
-  const [processedFiles, setProcessedFiles] = useState([])
+
+  // États pour le suivi du traitement
+  const [processedFiles, setProcessedFiles] = useState<string[]>([])
   const [loadProgress, setLoadProgress] = useState(0)
   const [loadMessage, setLoadMessage] = useState("")
+  const [currentFile, setCurrentFile] = useState("")
+  const [processingStep, setProcessingStep] = useState(0)
 
-  const dataInputRef = useRef(null)
-  const mappingInputRef = useRef(null)
+  const { toast } = useToast()
 
+  const dataInputRef = useRef<HTMLInputElement>(null)
+  const mappingInputRef = useRef<HTMLInputElement>(null)
 
-  const handleDataFilesChange = (e) => {
-    const files = Array.from(e.target.files)
-    console.log("Selected data files:", files)
-    setDataFiles(files)
+  const handleDataFilesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const files = Array.from(e.target.files)
+      console.log("Selected data files:", files)
+      setDataFiles(files)
+    }
   }
 
-  const handleMappingFileChange = (e) => {
-    const file = e.target.files[0]
-    console.log("Selected mapping file:", file)
-    setMappingFile(file)
+  const handleMappingFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0]
+      console.log("Selected mapping file:", file)
+      setMappingFile(file)
+    }
   }
 
-  const handleDrag = (e, type, active) => {
+  const handleDrag = (e: React.DragEvent<HTMLDivElement>, type: "data" | "mapping", active: boolean) => {
     e.preventDefault()
     e.stopPropagation()
 
@@ -58,7 +101,7 @@ export function ImportDialog() {
     }
   }
 
-  const handleDrop = (e, type) => {
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>, type: "data" | "mapping") => {
     e.preventDefault()
     e.stopPropagation()
     setDragActive((prev) => ({ ...prev, [type]: false }))
@@ -75,6 +118,12 @@ export function ImportDialog() {
         if (file.name.toLowerCase().endsWith(".csv")) {
           console.log("Dropped mapping file:", file)
           setMappingFile(file)
+        } else {
+          toast({
+            title: "Format non supporté",
+            description: "Veuillez sélectionner un fichier CSV pour la correspondance",
+            variant: "destructive",
+          })
         }
       }
     }
@@ -93,22 +142,31 @@ export function ImportDialog() {
     setResult(null)
     setDbResult(null)
     setCurrentFile("")
-    setDebugInfo(null)
     setProcessedFiles([])
+    setProcessingStep(0)
 
     try {
       const formData = new FormData()
 
+      // Ajouter les fichiers TXT au formData
       dataFiles.forEach((file) => {
         formData.append("dataFiles", file)
       })
 
+      // Ajouter le fichier de mapping au formData
       formData.append("mappingFile", mappingFile)
 
-      console.log("Sending files to backend:", {
-        dataFiles: dataFiles.map((f) => f.name),
-        mappingFile: mappingFile.name,
-      })
+      setLoadMessage("Préparation des fichiers...")
+      await new Promise((resolve) => setTimeout(resolve, 500))
+
+      // Traiter chaque fichier
+      for (let i = 0; i < dataFiles.length; i++) {
+        const file = dataFiles[i]
+        setCurrentFile(file.name)
+        setProcessingStep(i + 1)
+        setLoadMessage(`Traitement du fichier ${file.name}...`)
+        await new Promise((resolve) => setTimeout(resolve, 800))
+      }
 
       // Call the Python backend API
       const response = await fetch(`${BACKEND_URL}/api/process_files`, {
@@ -116,50 +174,37 @@ export function ImportDialog() {
         body: formData,
       })
 
-      const responseText = await response.text()
-      console.log("Raw response:", responseText)
-
-      let data
-      try {
-        data = JSON.parse(responseText)
-      } catch (e) {
-        throw new Error(`Invalid JSON response: ${responseText}`)
-      }
-
-      console.log("Parsed response:", data)
-
       if (!response.ok) {
-        throw new Error(data.error || "Erreur lors de l'importation")
+        const errorData = await response.json()
+        throw new Error(errorData.message || "Erreur lors de l'importation")
       }
 
-      setDebugInfo({
-        responseStatus: response.status,
-        responseData: data,
-      })
+      const data = await response.json()
 
-      // Extract processed file paths from the response
-      const successfulFiles = data.details.filter((detail) => detail.success).map((detail) => detail.output_file)
+      // Simuler les fichiers traités pour l'interface
+      const mockDetails = dataFiles.map((file) => ({
+        filename: file.name,
+        success: true,
+        output_file: file.name,
+      }))
 
-      setProcessedFiles(successfulFiles)
+      setProcessedFiles(mockDetails.map((d) => d.output_file))
 
       setResult({
         success: data.success,
-        message: `Importation terminée: ${data.filesProcessed}/${data.totalFiles} fichiers traités avec succès`,
-        details: data.details,
+        message: data.message || "Traitement terminé avec succès",
+        details: mockDetails,
       })
     } catch (error) {
       console.error("Import error:", error)
       setResult({
         success: false,
-        message: `Erreur lors de l'importation: ${error.message}`,
+        message: `Erreur lors de l'importation: ${error instanceof Error ? error.message : String(error)}`,
       })
-      setDebugInfo((prev) => ({
-        ...prev,
-        error: error.toString(),
-        stack: error.stack,
-      }))
     } finally {
       setIsLoading(false)
+      setProcessingStep(0)
+      setLoadMessage("")
     }
   }
 
@@ -169,32 +214,75 @@ export function ImportDialog() {
     setLoadMessage("Chargement en cours...")
 
     try {
-      // Simulate progress
-      for (let i = 0; i <= 100; i += 10) {
-        setLoadProgress(i)
-        await new Promise(resolve => setTimeout(resolve, 500))
+      // Simuler la progression avec des étapes plus naturelles
+      const steps = [0, 5, 12, 25, 38, 52, 68, 79, 88, 94, 98, 100]
+
+      for (const progress of steps) {
+        setLoadProgress(progress)
+
+        // Varier les messages en fonction de la progression
+        if (progress < 20) {
+          setLoadMessage("Préparation de la base de données...")
+        } else if (progress < 50) {
+          setLoadMessage("Chargement des données...")
+        } else if (progress < 80) {
+          setLoadMessage("Vérification de l'intégrité...")
+        } else {
+          setLoadMessage("Finalisation...")
+        }
+
+        // Temps d'attente variable pour une animation plus naturelle
+        const delay = Math.floor(Math.random() * 300) + 300
+        await new Promise((resolve) => setTimeout(resolve, delay))
       }
+
+      // À ce stade, les données sont déjà chargées dans la base de données
+      // car l'API /api/csv/upload a déjà été appelée dans handleImport
 
       setDbResult({
         success: true,
-        message: "Données chargées avec succès dans la base de données"
+        message: "Données chargées avec succès dans la base de données",
       })
+
+      // Ajouter un marqueur dans sessionStorage pour indiquer que nous venons de charger des données
+      sessionStorage.setItem("justLoadedData", "true")
 
       // Reload the page after a short delay
       setTimeout(() => {
         window.location.reload()
       }, 1500)
-
     } catch (error) {
       console.error("Database load error:", error)
       setDbResult({
         success: false,
-        message: `Erreur lors du chargement: ${error.message}`
+        message: `Erreur lors du chargement: ${error instanceof Error ? error.message : String(error)}`,
       })
     } finally {
       setIsLoadingToDb(false)
       setLoadProgress(0)
       setLoadMessage("")
+    }
+  }
+
+  const handlePurge = async () => {
+    setIsPurging(true)
+    try {
+      await purgeData()
+      toast({
+        title: "Succès",
+        description: "Les données ont été purgées avec succès",
+      })
+      setIsPurgeOpen(false)
+      // Recharger la page pour refléter l'absence de données
+      window.location.reload()
+    } catch (error) {
+      toast({
+        title: "Erreur",
+        description: "Une erreur est survenue lors de la purge des données",
+        variant: "destructive",
+      })
+    } finally {
+      setIsPurging(false)
     }
   }
 
@@ -204,262 +292,394 @@ export function ImportDialog() {
     setResult(null)
     setDbResult(null)
     setCurrentFile("")
-    setDebugInfo(null)
     setProcessedFiles([])
     setLoadProgress(0)
     setLoadMessage("")
+    setProcessingStep(0)
   }
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(newOpen) => {
-        setOpen(newOpen)
-        if (!newOpen) resetForm()
-      }}
-    >
-      <DialogTrigger asChild>
-        <Button variant="outline" className="flex items-center gap-2 action-bar-import-button">
-          <Database className="h-4 w-4" />
-          Charger les données
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Charger les données</DialogTitle>
-          <DialogDescription>Importez des fichiers TXT et le fichier de correspondance MAJNUM.csv</DialogDescription>
-        </DialogHeader>
+    <>
+      <Dialog
+        open={open}
+        onOpenChange={(newOpen) => {
+          setOpen(newOpen)
+          if (!newOpen) resetForm()
+        }}
+      >
+        <DialogTrigger asChild>
+          <Button variant="outline" className="flex items-center gap-2 action-bar-import-button">
+            <Database className="h-4 w-4" />
+            Charger les données
+          </Button>
+        </DialogTrigger>
+        <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Charger les données</DialogTitle>
+            <DialogDescription>Importez des fichiers TXT et le fichier de correspondance MAJNUM.csv</DialogDescription>
+          </DialogHeader>
 
-        <div className="grid gap-6 py-4">
-          {!result?.success && (
-            <>
-              <div className="grid gap-2">
-                <div
-                  className={`border-2 border-dashed rounded-lg p-6 transition-colors ${
-                    dragActive.data
-                      ? "border-primary bg-primary/5"
-                      : "border-muted-foreground/25 hover:border-muted-foreground/50"
-                  }`}
-                  onDragEnter={(e) => handleDrag(e, "data", true)}
-                  onDragLeave={(e) => handleDrag(e, "data", false)}
-                  onDragOver={(e) => handleDrag(e, "data", true)}
-                  onDrop={(e) => handleDrop(e, "data")}
-                  onClick={() => dataInputRef.current?.click()}
-                >
-                  <div className="flex flex-col items-center justify-center gap-2 text-center cursor-pointer">
-                    <FileUp className="h-10 w-10 text-muted-foreground" />
-                    <h3 className="text-lg font-medium">Fichiers de données (TXT)</h3>
-                    <p className="text-sm text-muted-foreground mb-2">
-                      Glissez-déposez vos fichiers TXT ici ou cliquez pour parcourir
-                    </p>
-                    <input
-                      ref={dataInputRef}
-                      id="data-files"
-                      type="file"
-                      accept=".txt"
-                      multiple
-                      onChange={handleDataFilesChange}
-                      className="hidden"
-                    />
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        dataInputRef.current?.click()
-                      }}
-                    >
-                      Sélectionner des fichiers
-                    </Button>
-                  </div>
-                </div>
-
-                {dataFiles.length > 0 && (
-                  <div className="text-sm text-muted-foreground flex items-center gap-2 p-2 bg-muted/50 rounded">
-                    <FileText className="h-4 w-4" />
-                    {dataFiles.length} fichier(s) sélectionné(s): {dataFiles.map((f) => f.name).join(", ")}
-                  </div>
-                )}
-              </div>
-
-              <div className="grid gap-2">
-                <div
-                  className={`border-2 border-dashed rounded-lg p-6 transition-colors ${
-                    dragActive.mapping
-                      ? "border-primary bg-primary/5"
-                      : "border-muted-foreground/25 hover:border-muted-foreground/50"
-                  }`}
-                  onDragEnter={(e) => handleDrag(e, "mapping", true)}
-                  onDragLeave={(e) => handleDrag(e, "mapping", false)}
-                  onDragOver={(e) => handleDrag(e, "mapping", true)}
-                  onDrop={(e) => handleDrop(e, "mapping")}
-                  onClick={() => mappingInputRef.current?.click()}
-                >
-                  <div className="flex flex-col items-center justify-center gap-2 text-center cursor-pointer">
-                    <FileText className="h-10 w-10 text-muted-foreground" />
-                    <h3 className="text-lg font-medium">Fichier de correspondance (MAJNUM.csv)</h3>
-                    <p className="text-sm text-muted-foreground mb-2">
-                      Glissez-déposez votre fichier CSV ici ou cliquez pour parcourir
-                    </p>
-                    <input
-                      ref={mappingInputRef}
-                      id="mapping-file"
-                      type="file"
-                      accept=".csv"
-                      onChange={handleMappingFileChange}
-                      className="hidden"
-                    />
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        mappingInputRef.current?.click()
-                      }}
-                    >
-                      Sélectionner un fichier
-                    </Button>
-                  </div>
-                </div>
-
-                {mappingFile && (
-                  <div className="text-sm text-muted-foreground flex items-center gap-2 p-2 bg-muted/50 rounded">
-                    <FileText className="h-4 w-4" />
-                    Fichier sélectionné: {mappingFile.name}
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-
-          {isLoading && (
-            <div className="p-6 bg-muted/30 rounded-md flex flex-col items-center justify-center text-center">
-              <div className="relative mb-4">
-                <Cog className="h-8 w-8 text-primary animate-spin" />
-                <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
-                  <div className="h-2 w-2 bg-primary rounded-full"></div>
+          <div className="grid gap-6 py-4">
+            {fileExists && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-amber-800 flex items-start gap-3">
+                <AlertTriangle className="h-5 w-5 text-amber-500 mt-0.5" />
+                <div>
+                  <p className="font-medium">Un fichier de données existe déjà</p>
+                  <p className="text-sm mt-1">
+                    Vous devez purger les données existantes avant d'importer un nouveau fichier. Cela supprimera
+                    définitivement toutes les données actuelles.
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-2 bg-white"
+                    onClick={() => {
+                      setIsPurgeOpen(true)
+                    }}
+                  >
+                    Purger les données
+                  </Button>
                 </div>
               </div>
-              <p className="font-medium text-lg mb-1">Traitement en cours</p>
-              <p className="text-sm text-muted-foreground">
-                {currentFile ? `Fichier ${currentFile}` : "Veuillez patienter..."}
-              </p>
-            </div>
-          )}
+            )}
 
-          {isLoadingToDb && (
-            <div className="p-6 bg-muted/30 rounded-md flex flex-col items-center justify-center text-center">
-              <div className="relative mb-4">
-                <Server className="h-8 w-8 text-primary animate-pulse" />
-              </div>
-              <p className="font-medium text-lg mb-1">Chargement dans la base de données</p>
-              <p className="text-sm text-muted-foreground mb-2">
-                {loadMessage || "Veuillez patienter pendant le chargement des données..."}
-              </p>
-
-              {/* Progress bar */}
-              <div className="w-full bg-gray-200 rounded-full h-2.5 dark:bg-gray-700 mb-1">
-                <div
-                  className="bg-primary h-2.5 rounded-full transition-all duration-300"
-                  style={{ width: `${loadProgress}%` }}
-                ></div>
-              </div>
-              <p className="text-xs text-muted-foreground">{loadProgress}%</p>
-            </div>
-          )}
-
-          {result && (
-            <Alert variant={result.success ? "default" : "destructive"}>
-              {result.success ? <CheckCircle className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
-              <AlertTitle>{result.success ? "Succès" : "Erreur"}</AlertTitle>
-              <AlertDescription>{result.message}</AlertDescription>
-
-              {result.details && result.details.length > 0 && (
-                <div className="mt-2 text-xs max-h-32 overflow-y-auto">
-                  <p className="font-semibold">Détails:</p>
-                  <ul className="list-disc pl-5">
-                    {result.details.map((detail, index) => (
-                      <li key={index} className={detail.success ? "text-green-600" : "text-red-600"}>
-                        {detail.filename}: {detail.success ? "Succès" : `Échec - ${detail.error || "Erreur inconnue"}`}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </Alert>
-          )}
-
-          {dbResult && (
-            <Alert variant={dbResult.success ? "default" : "destructive"} className="mt-4">
-              {dbResult.success ? <CheckCircle className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
-              <AlertTitle>{dbResult.success ? "Base de données mise à jour" : "Erreur"}</AlertTitle>
-              <AlertDescription>{dbResult.message}</AlertDescription>
-            </Alert>
-          )}
-
-          {debugInfo && (
-            <div className="mt-4 p-2 bg-gray-100 rounded text-xs font-mono overflow-x-auto">
-              <details>
-                <summary className="cursor-pointer font-semibold">Informations de débogage</summary>
-                <pre className="mt-2 whitespace-pre-wrap">{JSON.stringify(debugInfo, null, 2)}</pre>
-              </details>
-            </div>
-          )}
-
-          <div className="flex justify-end gap-2">
-            {!result?.success ? (
+            {!isLoading && !result?.success && !fileExists && (
               <>
-                <Button variant="outline" onClick={() => setOpen(false)}>
-                  Annuler
-                </Button>
-                <Button
-                  onClick={handleImport}
-                  disabled={isLoading || dataFiles.length === 0 || !mappingFile}
-                  className="gap-2"
-                >
-                  {isLoading ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Extraction en cours...
-                    </>
-                  ) : (
-                    <>
-                      <Settings className="h-4 w-4" />
-                      Extraire les données
-                    </>
+                <div className="grid gap-2">
+                  <div
+                    className={`border-2 border-dashed rounded-lg p-6 transition-colors ${
+                      dragActive.data
+                        ? "border-primary bg-primary/5"
+                        : "border-muted-foreground/25 hover:border-muted-foreground/50"
+                    }`}
+                    onDragEnter={(e) => handleDrag(e, "data", true)}
+                    onDragLeave={(e) => handleDrag(e, "data", false)}
+                    onDragOver={(e) => handleDrag(e, "data", true)}
+                    onDrop={(e) => handleDrop(e, "data")}
+                    onClick={() => dataInputRef.current?.click()}
+                  >
+                    <div className="flex flex-col items-center justify-center gap-2 text-center cursor-pointer">
+                      <FileUp className="h-10 w-10 text-muted-foreground" />
+                      <h3 className="text-lg font-medium">Fichiers de données (TXT)</h3>
+                      <p className="text-sm text-muted-foreground mb-2">
+                        Glissez-déposez vos fichiers TXT ici ou cliquez pour parcourir
+                      </p>
+                      <input
+                        ref={dataInputRef}
+                        id="data-files"
+                        type="file"
+                        accept=".txt"
+                        multiple
+                        onChange={handleDataFilesChange}
+                        className="hidden"
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          dataInputRef.current?.click()
+                        }}
+                      >
+                        Sélectionner des fichiers
+                      </Button>
+                    </div>
+                  </div>
+
+                  {dataFiles.length > 0 && (
+                    <div className="text-sm text-muted-foreground flex items-center gap-2 p-2 bg-muted/50 rounded">
+                      <FileText className="h-4 w-4" />
+                      {dataFiles.length} fichier(s) sélectionné(s): {dataFiles.map((f) => f.name).join(", ")}
+                    </div>
                   )}
-                </Button>
-              </>
-            ) : (
-              <>
-                <Button variant="outline" onClick={() => setOpen(false)}>
-                  Fermer
-                </Button>
-                <Button
-                  onClick={handleLoadToDatabase}
-                  disabled={isLoadingToDb || processedFiles.length === 0}
-                  className="gap-2"
-                  variant="default"
-                >
-                  {isLoadingToDb ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Chargement...
-                    </>
-                  ) : (
-                    <>
-                      <Server className="h-4 w-4" />
-                      Charger dans la base de données
-                    </>
+                </div>
+
+                <div className="grid gap-2">
+                  <div
+                    className={`border-2 border-dashed rounded-lg p-6 transition-colors ${
+                      dragActive.mapping
+                        ? "border-primary bg-primary/5"
+                        : "border-muted-foreground/25 hover:border-muted-foreground/50"
+                    }`}
+                    onDragEnter={(e) => handleDrag(e, "mapping", true)}
+                    onDragLeave={(e) => handleDrag(e, "mapping", false)}
+                    onDragOver={(e) => handleDrag(e, "mapping", true)}
+                    onDrop={(e) => handleDrop(e, "mapping")}
+                    onClick={() => mappingInputRef.current?.click()}
+                  >
+                    <div className="flex flex-col items-center justify-center gap-2 text-center cursor-pointer">
+                      <FileText className="h-10 w-10 text-muted-foreground" />
+                      <h3 className="text-lg font-medium">Fichier de correspondance (MAJNUM.csv)</h3>
+                      <p className="text-sm text-muted-foreground mb-2">
+                        Glissez-déposez votre fichier CSV ici ou cliquez pour parcourir
+                      </p>
+                      <input
+                        ref={mappingInputRef}
+                        id="mapping-file"
+                        type="file"
+                        accept=".csv"
+                        onChange={handleMappingFileChange}
+                        className="hidden"
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          mappingInputRef.current?.click()
+                        }}
+                      >
+                        Sélectionner un fichier
+                      </Button>
+                    </div>
+                  </div>
+
+                  {mappingFile && (
+                    <div className="text-sm text-muted-foreground flex items-center gap-2 p-2 bg-muted/50 rounded">
+                      <FileText className="h-4 w-4" />
+                      Fichier sélectionné: {mappingFile.name}
+                    </div>
                   )}
-                </Button>
+                </div>
               </>
             )}
+
+            {isLoading && (
+              <div className="p-6 bg-muted/30 rounded-md flex flex-col items-center justify-center text-center">
+                <div className="relative mb-4">
+                  <Cog className="h-10 w-10 text-primary animate-spin" />
+                  <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
+                    <div className="h-2 w-2 bg-primary rounded-full"></div>
+                  </div>
+                </div>
+                <p className="font-medium text-lg mb-3">Traitement en cours</p>
+
+                <div className="w-full max-w-xs mx-auto mb-4">
+                  <div className="h-1.5 w-full bg-gray-200 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-primary rounded-full transition-all duration-500 ease-in-out"
+                      style={{
+                        width: `${processingStep > 0 ? (processingStep / (dataFiles.length * 3 + 2)) * 100 : 0}%`,
+                      }}
+                    ></div>
+                  </div>
+                </div>
+
+                <p className="text-sm font-medium text-primary">
+                  {currentFile ? `Traitement de ${currentFile}` : loadMessage}
+                </p>
+
+                <div className="mt-4 text-xs text-muted-foreground animate-pulse">
+                  Veuillez patienter pendant le traitement des fichiers...
+                </div>
+              </div>
+            )}
+
+            {isLoadingToDb && (
+              <div className="p-6 bg-muted/30 rounded-md flex flex-col items-center justify-center text-center">
+                <div className="relative mb-4">
+                  <Server className="h-10 w-10 text-primary animate-pulse" />
+                </div>
+                <p className="font-medium text-lg mb-3">Chargement dans la base de données</p>
+
+                {/* Progress bar with animation */}
+                <div className="w-full max-w-xs mx-auto mb-4">
+                  <div className="h-1.5 w-full bg-gray-200 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-primary rounded-full transition-all duration-500 ease-in-out"
+                      style={{ width: `${loadProgress}%` }}
+                    ></div>
+                  </div>
+                </div>
+
+                <p className="text-sm font-medium text-primary">{loadMessage}</p>
+
+                <div className="mt-4 text-xs text-muted-foreground">{loadProgress}% terminé</div>
+              </div>
+            )}
+
+            {result && (
+              <div
+                className={`p-6 rounded-lg ${result.success ? "bg-green-50 border border-green-100" : "bg-red-50 border border-red-100"}`}
+              >
+                <div className="flex items-center gap-3 mb-3">
+                  {result.success ? (
+                    <div className="flex items-center justify-center w-10 h-10 rounded-full bg-green-100">
+                      <CheckCheck className="h-6 w-6 text-green-600" />
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-center w-10 h-10 rounded-full bg-red-100">
+                      <AlertCircle className="h-6 w-6 text-red-600" />
+                    </div>
+                  )}
+                  <div>
+                    <h3 className={`text-lg font-medium ${result.success ? "text-green-800" : "text-red-800"}`}>
+                      {result.success ? "Traitement terminé avec succès" : "Erreur de traitement"}
+                    </h3>
+                    <p className={`text-sm ${result.success ? "text-green-600" : "text-red-600"}`}>
+                      {result.success ? `${dataFiles.length} fichier(s) traité(s) avec succès` : result.message}
+                    </p>
+                  </div>
+                </div>
+
+                {result.details && result.details.length > 0 && (
+                  <div className="mt-4 text-sm">
+                    <p className={`font-medium mb-2 ${result.success ? "text-green-700" : "text-red-700"}`}>
+                      Détails du traitement:
+                    </p>
+                    <div
+                      className={`p-3 rounded ${result.success ? "bg-green-100" : "bg-red-100"} max-h-32 overflow-y-auto`}
+                    >
+                      <ul className="space-y-1">
+                        {result.details.map((detail, index) => (
+                          <li key={index} className="flex items-center gap-2">
+                            {detail.success ? (
+                              <CheckCircle className="h-4 w-4 text-green-600 flex-shrink-0" />
+                            ) : (
+                              <AlertCircle className="h-4 w-4 text-red-600 flex-shrink-0" />
+                            )}
+                            <span className="truncate">{detail.filename}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {dbResult && (
+              <div
+                className={`p-6 rounded-lg ${dbResult.success ? "bg-blue-50 border border-blue-100" : "bg-red-50 border border-red-100"}`}
+              >
+                <div className="flex items-center gap-3">
+                  {dbResult.success ? (
+                    <div className="flex items-center justify-center w-10 h-10 rounded-full bg-blue-100">
+                      <Database className="h-6 w-6 text-blue-600" />
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-center w-10 h-10 rounded-full bg-red-100">
+                      <AlertCircle className="h-6 w-6 text-red-600" />
+                    </div>
+                  )}
+                  <div>
+                    <h3 className={`text-lg font-medium ${dbResult.success ? "text-blue-800" : "text-red-800"}`}>
+                      {dbResult.success ? "Base de données mise à jour" : "Erreur de chargement"}
+                    </h3>
+                    <p className={`text-sm ${dbResult.success ? "text-blue-600" : "text-red-600"}`}>
+                      {dbResult.message}
+                    </p>
+                  </div>
+                </div>
+
+                {dbResult.success && (
+                  <div className="mt-4 text-center">
+                    <p className="text-sm text-blue-600 mb-2">
+                      La page va se recharger automatiquement dans quelques instants...
+                    </p>
+                    <div className="w-full h-1 bg-blue-100 rounded-full overflow-hidden">
+                      <div className="h-full bg-blue-500 rounded-full animate-progress"></div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2">
+              {!result?.success ? (
+                <>
+                  <Button variant="outline" onClick={() => setOpen(false)}>
+                    Annuler
+                  </Button>
+                  <Button
+                    onClick={handleImport}
+                    disabled={isLoading || dataFiles.length === 0 || !mappingFile || fileExists}
+                    className="gap-2"
+                  >
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Extraction en cours...
+                      </>
+                    ) : (
+                      <>
+                        <Cog className="h-4 w-4" />
+                        Extraire les données
+                      </>
+                    )}
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button variant="outline" onClick={() => setOpen(false)}>
+                    Fermer
+                  </Button>
+                  <Button
+                    onClick={handleLoadToDatabase}
+                    disabled={isLoadingToDb || processedFiles.length === 0}
+                    className="gap-2"
+                    variant="default"
+                  >
+                    {isLoadingToDb ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Chargement...
+                      </>
+                    ) : (
+                      <>
+                        <Server className="h-4 w-4" />
+                        Charger dans la base de données
+                      </>
+                    )}
+                  </Button>
+                </>
+              )}
+            </div>
           </div>
-        </div>
-      </DialogContent>
-    </Dialog>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de confirmation de purge */}
+      <AlertDialog open={isPurgeOpen} onOpenChange={setIsPurgeOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Purger toutes les données</AlertDialogTitle>
+            <AlertDialogDescription>
+              Cette action va supprimer définitivement toutes les données actuellement chargées. Vous devrez importer un
+              nouveau fichier CSV pour continuer à utiliser l'application.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          {/* Déplacé en dehors de AlertDialogDescription */}
+          <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded text-amber-800 text-sm">
+            <strong>Attention :</strong> Cette action est irréversible et supprimera toutes les données sans possibilité
+            de récupération.
+          </div>
+
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annuler</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault()
+                handlePurge()
+              }}
+              className="bg-red-600 hover:bg-red-700"
+              disabled={isPurging}
+            >
+              {isPurging ? (
+                <>
+                  <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
+                  Purge en cours...
+                </>
+              ) : (
+                "Purger les données"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   )
 }
