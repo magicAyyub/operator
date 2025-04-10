@@ -207,9 +207,15 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
 
         setProcessedFiles([dataFile.name])
 
+        // Construire un message qui inclut les informations sur les doublons
+        let successMessage = data.message || "Traitement terminé avec succès"
+        if (data.duplicates_info && data.duplicates_info.duplicates_found > 0) {
+          successMessage += ` (${data.duplicates_info.duplicates_found} doublons détectés et ignorés)`
+        }
+
         setResult({
           success: data.success,
-          message: data.message || "Traitement terminé avec succès",
+          message: successMessage,
           details: mockDetails,
         })
       } catch (fetchError) {
