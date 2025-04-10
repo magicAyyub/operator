@@ -456,6 +456,8 @@ Pour arrêter l'application, cliquez sur "Arrêter les services".
         else:
             self.log_display.append_message("Tous les prérequis sont installés", SUCCESS_COLOR)
             self.log_display.append_message("Prêt à démarrer l'application", SUCCESS_COLOR)
+
+        self.log_display.append_message(f"======== {platform.system()} - {platform.machine()}" , INFO_COLOR)
     
     def start_all(self):
         """Démarre tous les services"""

@@ -12,13 +12,12 @@ class Config:
     # Set executable name based on platform
     if platform.system() == "Windows":
         EXECUTABLE_NAME = "data_processor.exe"
-    elif platform.system() == "Linux":
-        if platform.system() == "Darwin" and platform.machine() == "arm64":
-            EXECUTABLE_NAME = "data_processor_linux_arm"
-        else:
-            EXECUTABLE_NAME = "data_processor"
     else:
-        EXECUTABLE_NAME = "data_processor"
+        if platform.machine() == "Linux":
+            EXECUTABLE_NAME = "data_processor"
+        else:
+            print("Running on other systems (wsl, etc.)")
+            EXECUTABLE_NAME = "data_processor_linux_arm"
     
     # Full path to the executable
     C_EXECUTABLE_PATH = EXECUTABLE_DIR + EXECUTABLE_NAME
