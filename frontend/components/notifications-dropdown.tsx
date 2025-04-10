@@ -210,11 +210,6 @@ export function NotificationsDropdown() {
                             Lignes traitées:{" "}
                             <span className="font-medium text-foreground">{notification.rowsProcessed}</span>
                           </p>
-                          {notification.duplicatesFound !== undefined && notification.duplicatesFound > 0 && (
-                            <p className="mt-0.5 text-amber-600">
-                              {notification.duplicatesFound} doublons détectés et ignorés
-                            </p>
-                          )}
                         </>
                       )}
                     </div>
@@ -229,15 +224,15 @@ export function NotificationsDropdown() {
       <AlertDialog open={isPurgeDialogOpen} onOpenChange={setIsPurgeDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Purger l'historique</AlertDialogTitle>
+            <AlertDialogTitle>Purger l&apos;historique</AlertDialogTitle>
             <AlertDialogDescription>
-              Êtes-vous sûr de vouloir effacer tout l'historique des chargements ? Cette action est irréversible.
+              Êtes-vous sûr de vouloir effacer tout l&apos;historique des chargements ? Cette action est irréversible.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Annuler</AlertDialogCancel>
             <AlertDialogAction onClick={handlePurgeNotifications} className="bg-red-600 hover:bg-red-700">
-              Purger l'historique
+              Purger l&apos;historique
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

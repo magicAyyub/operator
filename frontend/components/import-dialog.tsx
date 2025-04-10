@@ -1,17 +1,12 @@
 "use client"
 
+import { DialogTrigger } from "@/components/ui/dialog"
+
 import type React from "react"
 
 import { useState, useRef } from "react"
 import { Button } from "@/components/ui/button"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -165,9 +160,11 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
       // Ajouter le fichier de mapping au formData
       formData.append("mappingFile", mappingFile)
 
-      // Ajouter le mode d'ajout au formData (toujours true si fileExists est true)
+      // Désactiver la détection des doublons en envoyant toujours false
+      formData.append("appendMode", "false")
+
+      // Garder la variable pour les notifications
       const appendMode = fileExists
-      formData.append("appendMode", appendMode.toString())
 
       setLoadMessage("Préparation des fichiers...")
       await new Promise((resolve) => setTimeout(resolve, 500))
@@ -209,14 +206,11 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
 
         setProcessedFiles([dataFile.name])
 
-        // Construire un message qui inclut les informations sur les doublons
-        let successMessage = data.message || "Traitement terminé avec succès"
-        let duplicatesFound = 0
+        // Message de succès simple
+        const successMessage = data.message || "Traitement terminé avec succès"
 
-        if (data.duplicates_info && data.duplicates_info.duplicates_found > 0) {
-          duplicatesFound = data.duplicates_info.duplicates_found
-          successMessage += ` (${duplicatesFound} doublons détectés et ignorés)`
-        }
+        // Ne plus utiliser les informations sur les doublons
+        const duplicatesFound = 0
 
         setResult({
           success: data.success,
@@ -659,7 +653,7 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
                     ) : (
                       <>
                         <Upload className="h-4 w-4" />
-                        Traiter le fichier
+                        {fileExists ? "Ajouter aux données existantes" : "Charger les données"}
                       </>
                     )}
                   </Button>
@@ -682,8 +676,8 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
                       </>
                     ) : (
                       <>
-                        <CheckCheck className="h-4 w-4" />
-                        Terminer
+                        <Database className="h-4 w-4" />
+                        Charger dans la base de données
                       </>
                     )}
                   </Button>
