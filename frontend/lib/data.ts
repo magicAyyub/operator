@@ -5,7 +5,7 @@ const PAGE_SIZE = 10
 
 
 // Fonction utilitaire pour les requêtes avec timeout
-async function fetchWithTimeout(url: string, options = {}, timeout = 10000) {
+async function fetchWithTimeout(url: string, options = {}, timeout = 15 * 60 * 10000) {
   const controller = new AbortController()
   const { signal } = controller
 
