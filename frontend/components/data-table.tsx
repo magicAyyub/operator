@@ -30,7 +30,7 @@ export function DataTable() {
 
     try {
       // Ouvrir une nouvelle fenêtre avec l'URL d'exportation
-      const exportUrl = `/api/csv/export?${params.toString()}`
+      const exportUrl = `http://localhost:8000/api/csv/export?${params.toString()}`
       window.open(exportUrl, "_blank")
     } catch (error) {
       console.error("Erreur lors de l'exportation:", error)
@@ -137,6 +137,11 @@ export function DataTable() {
 
   // Vérifier si nous avons un message indiquant qu'il n'y a pas de données
   const noData = message === "no_data"
+
+  // Fonction pour formater les grands nombres avec des séparateurs de milliers
+  const formatNumber = (num) => {
+    return new Intl.NumberFormat("fr-FR").format(num)
+  }
 
   return (
     <div className="space-y-4">
@@ -291,7 +296,7 @@ export function DataTable() {
               data.map((row) => (
                 <TableRow key={row.id}>
                   <TableCell className="font-medium">{row.operateur}</TableCell>
-                  <TableCell>{row.nombre_in}</TableCell>
+                  <TableCell>{formatNumber(row.nombre_in)}</TableCell>
                   <TableCell>
                     {row.pourcentage_in}%
                     {isFiltered && renderVariationIndicator(row.pourcentage_in, row.pourcentage_filtre)}
