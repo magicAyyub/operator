@@ -395,7 +395,7 @@ Pour arrêter l'application, cliquez sur "Arrêter les services".
         # Vérifier Poetry
         try:
             result = subprocess.run(
-                ["poetry", "--version"], 
+                ["python","-m","poetry", "--version"], 
                 stdout=subprocess.PIPE, 
                 stderr=subprocess.PIPE, 
                 text=True
@@ -425,23 +425,6 @@ Pour arrêter l'application, cliquez sur "Arrêter les services".
         except (subprocess.SubprocessError, FileNotFoundError):
             missing.append("Node.js")
             self.log_display.append_message("Node.js: Non installé", ERROR_COLOR)
-        
-        # Vérifier npm
-        try:
-            result = subprocess.run(
-                ["npm", "--version"], 
-                stdout=subprocess.PIPE, 
-                stderr=subprocess.PIPE, 
-                text=True
-            )
-            if result.returncode == 0:
-                self.log_display.append_message(f"npm: Installé ({result.stdout.strip()})", SUCCESS_COLOR)
-            else:
-                missing.append("npm")
-                self.log_display.append_message("npm: Non installé ou non accessible", ERROR_COLOR)
-        except (subprocess.SubprocessError, FileNotFoundError):
-            missing.append("npm")
-            self.log_display.append_message("npm: Non installé", ERROR_COLOR)
         
         # Vérifier Docker
         try:
@@ -494,7 +477,7 @@ Pour arrêter l'application, cliquez sur "Arrêter les services".
         self.backend_status.update_status("Démarrage...", WARNING_COLOR)
         
         # Exécuter poetry install si nécessaire
-        poetry_install_cmd = "poetry install"
+        poetry_install_cmd = "python -m poetry install"
         self.log_display.append_message(f"Exécution de: {poetry_install_cmd}", INFO_COLOR)
         
         self.backend_runner = CommandRunner(poetry_install_cmd, cwd=BACKEND_DIR)
@@ -523,7 +506,7 @@ Pour arrêter l'application, cliquez sur "Arrêter les services".
         self.progress_bar.setValue(20)
         
         # Utiliser la commande Poetry
-        setup_cmd = "poetry run setup"
+        setup_cmd = "python -m poetry run setup"
         self.log_display.append_message(f"Exécution de: {setup_cmd}", INFO_COLOR)
         
         self.backend_runner = CommandRunner(setup_cmd, cwd=BACKEND_DIR)
@@ -687,7 +670,7 @@ Pour arrêter l'application, cliquez sur "Arrêter les services".
             self.backend_status.update_status("Arrêt...", WARNING_COLOR)
             
             # Utiliser la commande Poetry
-            stop_cmd = "poetry run stop"
+            stop_cmd = "python -m poetry run stop"
             self.log_display.append_message(f"Exécution de: {stop_cmd}", INFO_COLOR)
             
             self.stop_runner = CommandRunner(stop_cmd, cwd=BACKEND_DIR)
