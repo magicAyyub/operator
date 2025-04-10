@@ -239,65 +239,15 @@ async def process_files_endpoint(
                 existing_df = pd.read_csv(combined_output_path, low_memory=False)
                 logger.info(f"Existing file has {len(existing_df)} rows")
                 
-                # Détection des doublons
-                # Identifier les colonnes qui peuvent servir d'identifiants uniques
-                # Utiliser TELEPHONE et EMAIL comme identifiants si disponibles
-                id_columns = []
-                if 'TELEPHONE' in processed_df.columns and 'TELEPHONE' in existing_df.columns:
-                    id_columns.append('TELEPHONE')
-                if 'EMAIL' in processed_df.columns and 'EMAIL' in existing_df.columns:
-                    id_columns.append('EMAIL')
-                if 'UUID' in processed_df.columns and 'UUID' in existing_df.columns:
-                    id_columns.append('UUID')
+                # Désactivation complète de la détection des doublons
+                # Simplement concaténer les dataframes sans aucune vérification
+                combined_df = pd.concat([existing_df, processed_df], ignore_index=True)
+                logger.info(f"Combined dataframe has {len(combined_df)} rows (no duplicate detection)")
                 
-                if id_columns:
-                    logger.info(f"Checking for duplicates using columns: {id_columns}")
-                    # Compter les lignes avant déduplication
-                    total_rows_before = len(existing_df) + len(processed_df)
-                    
-                    # Marquer les doublons dans le nouveau dataframe
-                    processed_df['_is_duplicate'] = False
-                    for idx, row in processed_df.iterrows():
-                        # Construire une condition pour vérifier si cette ligne existe déjà
-                        conditions = []
-                        for col in id_columns:
-                            if pd.notna(row[col]):  # Vérifier que la valeur n'est pas NA
-                                conditions.append(f"existing_df['{col}'] == '{row[col]}'")
-                        
-                        if conditions:
-                            # Exécuter la condition pour trouver les doublons
-                            condition_str = " | ".join(conditions)
-                            duplicates = eval(f"existing_df[{condition_str}]")
-                            if len(duplicates) > 0:
-                                processed_df.at[idx, '_is_duplicate'] = True
-                    
-                    # Filtrer les doublons
-                    unique_rows = processed_df[~processed_df['_is_duplicate']]
-                    duplicates_count = len(processed_df) - len(unique_rows)
-                    logger.info(f"Found {duplicates_count} duplicate rows")
-                    
-                    # Supprimer la colonne temporaire
-                    unique_rows = unique_rows.drop('_is_duplicate', axis=1)
-                    
-                    # Combiner les dataframes sans les doublons
-                    combined_df = pd.concat([existing_df, unique_rows], ignore_index=True)
-                    logger.info(f"Combined dataframe has {len(combined_df)} rows after removing duplicates")
-                    
-                    # Ajouter des informations sur les doublons dans la réponse
-                    duplicates_info = {
-                        "duplicates_found": duplicates_count,
-                        "duplicates_removed": duplicates_count,
-                        "rows_before": total_rows_before,
-                        "rows_after": len(combined_df)
-                    }
-                else:
-                    logger.warning("No suitable columns found for duplicate detection")
-                    # Si aucune colonne d'identification n'est trouvée, simplement concaténer
-                    combined_df = pd.concat([existing_df, processed_df], ignore_index=True)
-                    logger.info(f"Combined dataframe has {len(combined_df)} rows (no duplicate detection)")
-                    duplicates_info = {"duplicates_found": 0, "duplicates_removed": 0}
+                # Information sur les doublons (toujours à 0 car désactivé)
+                duplicates_info = {"duplicates_found": 0, "duplicates_removed": 0}
             except Exception as e:
-                logger.error(f"Error reading existing file or handling duplicates: {e}")
+                logger.error(f"Error reading existing file: {e}")
                 # If there's an error reading the existing file, just use the processed data
                 combined_df = processed_df
                 duplicates_info = {"error": str(e)}

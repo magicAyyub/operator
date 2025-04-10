@@ -160,8 +160,8 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
       // Ajouter le fichier de mapping au formData
       formData.append("mappingFile", mappingFile)
 
-      // Désactiver la détection des doublons en envoyant toujours false
-      formData.append("appendMode", "false")
+      // Toujours utiliser appendMode=true si des données existent déjà
+      formData.append("appendMode", fileExists ? "true" : "false")
 
       // Garder la variable pour les notifications
       const appendMode = fileExists
