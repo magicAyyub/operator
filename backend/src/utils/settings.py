@@ -1,6 +1,3 @@
-from pathlib import Path
-import platform
-
 class Config:
     BASE_ROOT = "src/"
     UPLOAD_FOLDER = BASE_ROOT + "data/"
@@ -9,15 +6,9 @@ class Config:
     # Dynamically determine the executable path based on platform
     EXECUTABLE_DIR = BASE_ROOT + "executables/"
     
-    # Set executable name based on platform
-    if platform.system() == "Windows":
-        EXECUTABLE_NAME = "data_processor.exe"
-    else:
-        if platform.machine() == "Linux":
-            EXECUTABLE_NAME = "data_processor"
-        else:
-            print("Running on other systems (wsl, etc.)")
-            EXECUTABLE_NAME = "data_processor_linux_arm"
+    EXECUTABLE_NAME = "data_processor"
+    # For Mac
+    # EXECUTABLE_NAME = "data_processor_linux_arm"
     
     # Full path to the executable
     C_EXECUTABLE_PATH = EXECUTABLE_DIR + EXECUTABLE_NAME
