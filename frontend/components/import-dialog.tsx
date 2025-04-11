@@ -359,8 +359,8 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
       >
         <DialogTrigger asChild>
           <Button variant="outline" className="flex items-center gap-2 action-bar-import-button">
-            <CheckCheck className="h-4 w-4" />
-            Terminer
+            <Database className="h-4 w-4" />
+            Charger les données
           </Button>
         </DialogTrigger>
         <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
@@ -676,8 +676,8 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
                       </>
                     ) : (
                       <>
-                        <Database className="h-4 w-4" />
-                        Charger dans la base de données
+                        <CheckCheck className="h-4 w-4" />
+                        Terminer
                       </>
                     )}
                   </Button>
