@@ -1,52 +1,34 @@
 "use client"
 
-// FileSplitter.tsx
-import type React from "react"
-import { useState, useCallback } from "react"
+import { useState } from "react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Slider } from "@/components/ui/slider"
-import { useToast } from "@/hooks/use-toast"
 import { Progress } from "@/components/ui/progress"
+import { Scissors, FileText, CheckCircle, AlertCircle } from "lucide-react"
+import { useToast } from "@/hooks/use-toast"
 
 interface FileSplitterProps {
+  file: File
   onSplitComplete: (files: File[]) => void
+  onCancel: () => void
 }
 
-const FileSplitter: React.FC<FileSplitterProps> = ({ onSplitComplete }) => {
-  const [file, setFile] = useState<File | null>(null)
-  const [parts, setParts] = useState<number | null>(null)
+export default function FileSplitter({ file, onSplitComplete, onCancel }: FileSplitterProps) {
+  const [splitting, setSplitting] = useState(false)
+  const [progress, setProgress] = useState(0)
+  const [parts, setParts] = useState<number>(2)
   const [splitFiles, setSplitFiles] = useState<File[]>([])
-  const [splitting, setSplitting] = useState<boolean>(false)
-  const [progress, setProgress] = useState<number>(0)
   const [error, setError] = useState<string | null>(null)
   const { toast } = useToast()
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0]
-    setFile(selectedFile || null)
-    setSplitFiles([]) // Reset split files when a new file is selected
+  // Calculate optimal number of parts based on file size
+  const calculateOptimalParts = () => {
+    const sizeInGB = file.size / (1024 * 1024 * 1024)
+    if (sizeInGB > 3) return 4
+    if (sizeInGB > 2) return 3
+    return 2
   }
 
-  const calculateOptimalParts = useCallback(() => {
-    if (!file) return 5 // Default value
-
-    const fileSizeInMB = file.size / (1024 * 1024)
-    let optimalParts = 5 // Default value
-
-    if (fileSizeInMB > 100) {
-      optimalParts = 20
-    } else if (fileSizeInMB > 50) {
-      optimalParts = 15
-    } else if (fileSizeInMB > 10) {
-      optimalParts = 10
-    }
-
-    return optimalParts
-  }, [file])
-
-  // Remplacer la fonction splitFileSimple par cette version améliorée
+  // Split the file into multiple parts with header preservation
   const splitFileSimple = async () => {
     setSplitting(true)
     setProgress(0)
@@ -87,7 +69,7 @@ const FileSplitter: React.FC<FileSplitterProps> = ({ onSplitComplete }) => {
       for (let i = 0; i < optimalParts; i++) {
         setProgress(Math.round((i / optimalParts) * 100))
 
-        // Calculer les positions de début et fin pour le contenu (sans l'en-tête)
+        // Calculer les positions de début et fin pour le contenu
         const start = i * partSize
         const end = Math.min(file.size, (i + 1) * partSize)
 
@@ -140,64 +122,106 @@ const FileSplitter: React.FC<FileSplitterProps> = ({ onSplitComplete }) => {
     }
   }
 
-  const handleSplitFile = () => {
-    if (!file) {
-      toast({
-        title: "Erreur",
-        description: "Veuillez sélectionner un fichier.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    splitFileSimple()
-  }
-
   return (
-    <div className="container mx-auto p-4">
-      <h1 className="text-2xl font-bold mb-4">Diviseur de fichier</h1>
-      <div className="mb-4">
-        <Label htmlFor="file">Sélectionner un fichier</Label>
-        <Input type="file" id="file" onChange={handleFileChange} />
+    <div className="space-y-4 p-4 border rounded-lg bg-muted/20">
+      <div className="flex items-start gap-3">
+        <div className="bg-primary/10 p-2 rounded-full">
+          <Scissors className="h-5 w-5 text-primary" />
+        </div>
+        <div>
+          <h3 className="text-lg font-medium">Division du fichier</h3>
+          <p className="text-sm text-muted-foreground">
+            Nous allons diviser <span className="font-medium">{file.name}</span> en plusieurs parties pour faciliter le
+            traitement.
+          </p>
+        </div>
       </div>
 
-      {file && (
-        <div className="mb-4">
-          <Label htmlFor="parts">Nombre de parties (optionnel)</Label>
-          <Slider
-            id="parts"
-            defaultValue={[calculateOptimalParts()]}
-            max={20}
-            min={2}
-            step={1}
-            onValueChange={(value) => setParts(value[0])}
-          />
-          <p className="text-sm text-muted-foreground">{parts || calculateOptimalParts()} parties</p>
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-800 flex items-start gap-3">
+          <AlertCircle className="h-5 w-5 text-red-500 mt-0.5" />
+          <div>
+            <p className="font-medium">Erreur lors de la division du fichier</p>
+            <p className="text-sm mt-1">{error}</p>
+            <p className="text-sm mt-2">Essayez avec un fichier plus petit ou contactez le support technique.</p>
+          </div>
         </div>
       )}
 
-      <Button onClick={handleSplitFile} disabled={splitting}>
-        {splitting ? "Division en cours..." : "Diviser le fichier"}
-      </Button>
+      {!splitting && splitFiles.length === 0 && (
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <label htmlFor="parts" className="text-sm font-medium">
+              Nombre de parties
+            </label>
+            <select
+              id="parts"
+              className="w-full rounded-md border border-input bg-background px-3 py-2"
+              value={parts}
+              onChange={(e) => setParts(Number.parseInt(e.target.value))}
+            >
+              <option value={2}>2 parties</option>
+              <option value={3}>3 parties</option>
+              <option value={4}>4 parties</option>
+              <option value={5}>5 parties</option>
+            </select>
+            <p className="text-xs text-muted-foreground">
+              Recommandation: {calculateOptimalParts()} parties pour un fichier de{" "}
+              {(file.size / (1024 * 1024 * 1024)).toFixed(2)} GB
+            </p>
+          </div>
 
-      {splitting && <Progress value={progress} className="mt-4" />}
+          <div className="flex flex-col sm:flex-row justify-end gap-2">
+            <Button variant="outline" onClick={onCancel}>
+              Annuler
+            </Button>
+            <Button onClick={splitFileSimple} className="gap-2">
+              <Scissors className="h-4 w-4" />
+              Diviser le fichier
+            </Button>
+          </div>
+        </div>
+      )}
 
-      {error && <div className="text-red-500 mt-4">Erreur: {error}</div>}
+      {splitting && (
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <div className="flex justify-between text-sm">
+              <span>Progression</span>
+              <span>{progress}%</span>
+            </div>
+            <Progress value={progress} className="h-2" />
+          </div>
+          <p className="text-sm text-center text-muted-foreground animate-pulse">Division du fichier en cours...</p>
+        </div>
+      )}
 
-      {splitFiles.length > 0 && (
-        <div className="mt-4">
-          <h2 className="text-lg font-semibold mb-2">Fichiers divisés:</h2>
-          <ul>
-            {splitFiles.map((splitFile, index) => (
-              <li key={index}>
-                {splitFile.name} ({splitFile.size} bytes)
-              </li>
-            ))}
-          </ul>
+      {!splitting && splitFiles.length > 0 && (
+        <div className="space-y-4">
+          <div className="rounded-lg border bg-card p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <CheckCircle className="h-5 w-5 text-green-600" />
+              <h4 className="font-medium">Fichier divisé avec succès</h4>
+            </div>
+            <ul className="space-y-2">
+              {splitFiles.map((file, index) => (
+                <li key={index} className="flex items-center gap-2 text-sm">
+                  <FileText className="h-4 w-4 text-muted-foreground" />
+                  <span className="flex-1 truncate">{file.name}</span>
+                  <span className="text-xs text-muted-foreground">{(file.size / (1024 * 1024)).toFixed(2)} MB</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div className="flex justify-end">
+            <Button onClick={() => onSplitComplete(splitFiles)} className="gap-2">
+              <CheckCircle className="h-4 w-4" />
+              Utiliser ces fichiers
+            </Button>
+          </div>
         </div>
       )}
     </div>
   )
 }
-
-export default FileSplitter
