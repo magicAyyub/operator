@@ -38,8 +38,8 @@ import FileSplitter from "@/components/file-splitter"
 // Configure this to match your backend URL
 const BACKEND_URL = "http://localhost:8000"
 
-// File size threshold for warning (2GB)
-const FILE_SIZE_WARNING_THRESHOLD = 2 * 1024 * 1024 * 1024
+// File size threshold for warning (1GB)
+const FILE_SIZE_WARNING_THRESHOLD = 1 * 1068 * 1068 * 1068
 
 interface ImportDialogProps {
   fileExists: boolean
@@ -213,7 +213,7 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
 
       // Faire l'appel API avec un timeout
       const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 10 * 60 * 1000) // 10 minutes timeout
+      const timeoutId = setTimeout(() => controller.abort(), 20 * 60 * 1000) // 20 minutes timeout
 
       try {
         const response = await fetch(`${BACKEND_URL}/api/process_files`, {
@@ -381,7 +381,7 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
       setLoadMessage(`Traitement du fichier ${dataFile.name}...`)
 
       const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 10 * 60 * 1000) // 10 minutes timeout
+      const timeoutId = setTimeout(() => controller.abort(), 20 * 60 * 1000) // 20 minutes timeout
 
       try {
         const response = await fetch(`${BACKEND_URL}/api/process_files`, {

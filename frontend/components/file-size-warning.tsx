@@ -28,7 +28,7 @@ export function FileSizeWarning({ fileName, fileSize, onSplit, onContinue }: Fil
             <span className="font-medium">{fileSizeGB} GB</span>.
           </p>
           <p className="mt-2">
-            Les fichiers de plus de 2 GB peuvent causer des problèmes lors du traitement via le navigateur. Nous
+            Les fichiers de plus de 1 GB peuvent causer des problèmes lors du traitement via le navigateur. Nous
             recommandons de diviser ce fichier en parties plus petites pour un traitement plus fiable.
           </p>
           <div className="mt-4 flex flex-col sm:flex-row gap-2">
