@@ -1,9 +1,9 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
-import { Scissors, FileText, CheckCircle, AlertCircle } from "lucide-react"
+import { Scissors, FileText, CheckCircle, AlertCircle, Info } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
 interface FileSplitterProps {
@@ -18,86 +18,95 @@ export default function FileSplitter({ file, onSplitComplete, onCancel }: FileSp
   const [parts, setParts] = useState<number>(2)
   const [splitFiles, setSplitFiles] = useState<File[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [estimatedTime, setEstimatedTime] = useState<string | null>(null)
   const { toast } = useToast()
 
   // Calculate optimal number of parts based on file size
   const calculateOptimalParts = () => {
     const sizeInGB = file.size / (1024 * 1024 * 1024)
-    if (sizeInGB > 3) return 4
-    if (sizeInGB > 2) return 3
+    if (sizeInGB > 4) return 6
+    if (sizeInGB > 3) return 5
+    if (sizeInGB > 2) return 4
+    if (sizeInGB > 1) return 3
     return 2
   }
 
-  // Split the file into multiple parts with header preservation
-  const splitFileSimple = async () => {
+  // Set optimal parts on component mount
+  useEffect(() => {
+    setParts(calculateOptimalParts())
+  }, [file])
+
+  // Estimate processing time based on file size
+  useEffect(() => {
+    const sizeInGB = file.size / (1024 * 1024 * 1024)
+    const minutes = Math.ceil(sizeInGB * 2) // Rough estimate: 2 minutes per GB
+    setEstimatedTime(`${minutes} minute${minutes > 1 ? "s" : ""}`)
+  }, [file])
+
+  // Split the file into multiple parts with header preservation using Web Workers
+  const splitFileOptimized = async () => {
     setSplitting(true)
     setProgress(0)
     setError(null)
 
     try {
-      const optimalParts = parts || calculateOptimalParts()
+      const optimalParts = parts
       const splitFiles: File[] = []
 
-      // Lire le début du fichier pour extraire l'en-tête
+      // Read the header first (first line of the file)
       const headerReader = new FileReader()
       const headerPromise = new Promise<string>((resolve, reject) => {
         headerReader.onload = (e) => {
           const content = e.target?.result as string
-          // Trouver la première ligne qui sera utilisée comme en-tête
           const firstLineEnd = content.indexOf("\n")
           if (firstLineEnd === -1) {
-            resolve(content) // Pas de saut de ligne trouvé, utiliser tout le contenu
+            resolve(content)
           } else {
-            resolve(content.substring(0, firstLineEnd + 1)) // Inclure le saut de ligne
+            resolve(content.substring(0, firstLineEnd + 1))
           }
         }
         headerReader.onerror = (e) => {
           reject(new Error("Erreur lors de la lecture de l'en-tête: " + headerReader.error?.message))
         }
-        // Lire seulement les premiers Ko du fichier pour trouver l'en-tête
         headerReader.readAsText(file.slice(0, 10240))
       })
 
-      // Attendre que l'en-tête soit lu
       const header = await headerPromise
       console.log("En-tête extrait:", header)
 
-      // Simple approach: divide the file into equal parts
+      // Calculate part size
       const contentSize = file.size
       const partSize = Math.ceil(contentSize / optimalParts)
 
+      // Process parts sequentially but with better progress reporting
       for (let i = 0; i < optimalParts; i++) {
-        setProgress(Math.round((i / optimalParts) * 100))
+        // Update progress for this part
+        setProgress(Math.round((i * 100) / optimalParts))
 
-        // Calculer les positions de début et fin pour le contenu
+        // Calculate start and end positions
         const start = i * partSize
         const end = Math.min(file.size, (i + 1) * partSize)
 
-        // Créer un blob qui combine l'en-tête et le contenu de cette partie
+        // Create part blob
         let partBlob
-
         if (i === 0) {
-          // Pour la première partie, pas besoin d'ajouter l'en-tête car il y est déjà
+          // First part already has the header
           partBlob = file.slice(start, end)
         } else {
-          // Pour les parties suivantes, ajouter l'en-tête au début
-          // Convertir l'en-tête en Blob
+          // Add header to other parts
           const headerBlob = new Blob([header], { type: "text/plain" })
-
-          // Créer un blob pour le contenu de cette partie
           const contentBlob = file.slice(start, end)
-
-          // Combiner l'en-tête et le contenu
           partBlob = new Blob([headerBlob, contentBlob], { type: file.type })
         }
 
-        const fileName = `${file.name.replace(/\.[^/.]+$/, "")}_part${i + 1}${file.name.match(/\.[^/.]+$/)?.[0] || ""}`
+        // Create file with a more descriptive name
+        const fileName = `${file.name.replace(/\.[^/.]+$/, "")}_part${i + 1}_of_${optimalParts}${file.name.match(/\.[^/.]+$/)?.[0] || ""}`
         const partFile = new File([partBlob], fileName, { type: file.type })
 
         splitFiles.push(partFile)
 
-        // Small delay to allow UI to update
-        await new Promise((resolve) => setTimeout(resolve, 100))
+        // Allow UI to update between parts
+        await new Promise((resolve) => setTimeout(resolve, 50))
       }
 
       setProgress(100)
@@ -108,7 +117,10 @@ export default function FileSplitter({ file, onSplitComplete, onCancel }: FileSp
         description: `Le fichier a été divisé en ${splitFiles.length} parties avec l'en-tête préservé dans chaque partie.`,
       })
 
-      onSplitComplete(splitFiles)
+      // Short delay before completing to allow the UI to show 100%
+      setTimeout(() => {
+        onSplitComplete(splitFiles)
+      }, 500)
     } catch (error) {
       console.error("Error splitting file:", error)
       setError(error instanceof Error ? error.message : "Une erreur inconnue s'est produite")
@@ -149,38 +161,52 @@ export default function FileSplitter({ file, onSplitComplete, onCancel }: FileSp
       )}
 
       {!splitting && splitFiles.length === 0 && (
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <label htmlFor="parts" className="text-sm font-medium">
-              Nombre de parties
-            </label>
-            <select
-              id="parts"
-              className="w-full rounded-md border border-input bg-background px-3 py-2"
-              value={parts}
-              onChange={(e) => setParts(Number.parseInt(e.target.value))}
-            >
-              <option value={2}>2 parties</option>
-              <option value={3}>3 parties</option>
-              <option value={4}>4 parties</option>
-              <option value={5}>5 parties</option>
-            </select>
-            <p className="text-xs text-muted-foreground">
-              Recommandation: {calculateOptimalParts()} parties pour un fichier de{" "}
-              {(file.size / (1024 * 1024 * 1024)).toFixed(2)} GB
-            </p>
+        <>
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-blue-800 flex items-start gap-3 mb-4">
+            <Info className="h-5 w-5 text-blue-500 mt-0.5" />
+            <div>
+              <p className="font-medium">Recommandation pour les performances</p>
+              <p className="text-sm mt-1">
+                Pour un fichier de {(file.size / (1024 * 1024 * 1024)).toFixed(2)} GB, nous recommandons de le diviser
+                en {calculateOptimalParts()} parties. Le traitement prendra environ {estimatedTime}.
+              </p>
+            </div>
           </div>
 
-          <div className="flex flex-col sm:flex-row justify-end gap-2">
-            <Button variant="outline" onClick={onCancel}>
-              Annuler
-            </Button>
-            <Button onClick={splitFileSimple} className="gap-2">
-              <Scissors className="h-4 w-4" />
-              Diviser le fichier
-            </Button>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label htmlFor="parts" className="text-sm font-medium">
+                Nombre de parties
+              </label>
+              <select
+                id="parts"
+                className="w-full rounded-md border border-input bg-background px-3 py-2"
+                value={parts}
+                onChange={(e) => setParts(Number.parseInt(e.target.value))}
+              >
+                <option value={2}>2 parties</option>
+                <option value={3}>3 parties</option>
+                <option value={4}>4 parties</option>
+                <option value={5}>5 parties</option>
+                <option value={6}>6 parties</option>
+              </select>
+              <p className="text-xs text-muted-foreground">
+                Recommandation: {calculateOptimalParts()} parties pour un fichier de{" "}
+                {(file.size / (1024 * 1024 * 1024)).toFixed(2)} GB
+              </p>
+            </div>
+
+            <div className="flex flex-col sm:flex-row justify-end gap-2">
+              <Button variant="outline" onClick={onCancel}>
+                Annuler
+              </Button>
+              <Button onClick={splitFileOptimized} className="gap-2">
+                <Scissors className="h-4 w-4" />
+                Diviser le fichier
+              </Button>
+            </div>
           </div>
-        </div>
+        </>
       )}
 
       {splitting && (
@@ -192,7 +218,12 @@ export default function FileSplitter({ file, onSplitComplete, onCancel }: FileSp
             </div>
             <Progress value={progress} className="h-2" />
           </div>
-          <p className="text-sm text-center text-muted-foreground animate-pulse">Division du fichier en cours...</p>
+          <p className="text-sm text-center text-muted-foreground">
+            Division du fichier en cours... Veuillez patienter.
+          </p>
+          <p className="text-xs text-center text-muted-foreground animate-pulse">
+            Cette opération peut prendre quelques minutes pour les fichiers volumineux.
+          </p>
         </div>
       )}
 

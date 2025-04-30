@@ -165,3 +165,8 @@ def detect_encoding(file_path):
     with open(file_path, 'rb') as file:
         raw_data = file.read()
     return chardet.detect(raw_data)['encoding']
+
+def clean_error_message(error_msg: str) -> str:
+    """Clean and truncate error messages"""
+    error_msg = error_msg.replace('\n', ' ').strip()
+    return error_msg[:500]  # Truncate long error messages

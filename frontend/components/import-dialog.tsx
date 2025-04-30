@@ -2,7 +2,7 @@
 
 import { DialogTrigger } from "@/components/ui/dialog"
 import type React from "react"
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import {
@@ -28,6 +28,7 @@ import {
   Trash2,
   Server,
   Scissors,
+  RefreshCw,
 } from "lucide-react"
 import { purgeData } from "@/lib/data"
 import { useToast } from "@/hooks/use-toast"
@@ -36,10 +37,13 @@ import { FileSizeWarning } from "@/components/file-size-warning"
 import FileSplitter from "@/components/file-splitter"
 
 // Configure this to match your backend URL
-const BACKEND_URL = "http://localhost:8000"
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000"
 
 // File size threshold for warning (1GB)
-const FILE_SIZE_WARNING_THRESHOLD = 1 * 1068 * 1068 * 1068
+const FILE_SIZE_WARNING_THRESHOLD = 1 * 1024 * 1024 * 1024
+
+// Delay between processing parts (in milliseconds)
+const PROCESSING_DELAY = 5000
 
 interface ImportDialogProps {
   fileExists: boolean
@@ -76,11 +80,72 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
   const [currentFile, setCurrentFile] = useState("")
   const [processingStep, setProcessingStep] = useState(0)
   const [processingAllParts, setProcessingAllParts] = useState(false)
+  const [retryAttempts, setRetryAttempts] = useState<Record<number, number>>({})
+  const [isRetrying, setIsRetrying] = useState(false)
+  const [currentRetryIndex, setCurrentRetryIndex] = useState(-1)
+  const [retryDialogOpen, setRetryDialogOpen] = useState(false)
+  const [serverAvailable, setServerAvailable] = useState(true)
 
   const { toast } = useToast()
 
   const dataInputRef = useRef<HTMLInputElement>(null)
   const mappingInputRef = useRef<HTMLInputElement>(null)
+  const abortControllerRef = useRef<AbortController | null>(null)
+
+  // Check server availability
+  const checkServerAvailability = useCallback(async () => {
+    try {
+      const controller = new AbortController()
+      const { signal } = controller
+
+      // Create a promise that will resolve with the fetch result
+      const fetchPromise = fetch(`${BACKEND_URL}/api/health`, {
+        method: "GET",
+        signal,
+      })
+
+      // Create a timeout promise
+      const timeoutPromise = new Promise((_, reject) => {
+        const id = setTimeout(() => {
+          controller.abort()
+          reject(new Error("Timeout checking server availability"))
+        }, 5000)
+
+        // Store the timeout ID so it can be cleared
+        return () => clearTimeout(id)
+      })
+
+      // Race the fetch against the timeout
+      const response = await Promise.race([fetchPromise, timeoutPromise])
+
+      const isAvailable = response.ok
+      setServerAvailable(isAvailable)
+      return isAvailable
+    } catch (error) {
+      // Handle abort errors gracefully
+      if (error.name === "AbortError") {
+        console.log("Server availability check timed out")
+      } else {
+        console.error("Error checking server availability:", error)
+      }
+      setServerAvailable(false)
+      return false
+    }
+  }, [])
+
+  // Check server on mount
+  useEffect(() => {
+    checkServerAvailability()
+  }, [checkServerAvailability])
+
+  // Cleanup abort controller on unmount
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
+      }
+    }
+  }, [])
 
   // Traitement automatique des parties
   useEffect(() => {
@@ -95,7 +160,7 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
       // Traiter la partie actuelle
       const timer = setTimeout(() => {
         handleImportSplitFile(splitFiles[currentSplitFileIndex], currentSplitFileIndex)
-      }, 1000) // Délai réduit à 1 seconde pour plus de fluidité
+      }, PROCESSING_DELAY) // Délai entre les parties
 
       return () => clearTimeout(timer)
     }
@@ -188,12 +253,25 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
     setSplitResults([])
     setProcessedFiles([])
     setFailedFiles([])
+    setRetryAttempts({})
     setCurrentSplitFileIndex(0) // Start with the first file
     setProcessingAllParts(true) // Activer le traitement automatique
   }
 
   const handleImportSplitFile = async (file: File, index: number) => {
     if (!file || !mappingFile) {
+      return
+    }
+
+    // Check server availability first
+    const isAvailable = await checkServerAvailability()
+    if (!isAvailable) {
+      toast({
+        title: "Serveur indisponible",
+        description: "Le serveur n'est pas accessible. Veuillez vérifier votre connexion et réessayer.",
+        variant: "destructive",
+      })
+      setProcessingAllParts(false)
       return
     }
 
@@ -212,20 +290,45 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
       formData.append("appendMode", shouldAppend ? "true" : "false")
 
       // Faire l'appel API avec un timeout
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 20 * 60 * 1000) // 20 minutes timeout
+      abortControllerRef.current = new AbortController()
+      const timeoutId = setTimeout(
+        () => {
+          if (abortControllerRef.current) {
+            abortControllerRef.current.abort()
+          }
+        },
+        30 * 60 * 1000,
+      ) // 30 minutes timeout
 
       try {
-        const response = await fetch(`${BACKEND_URL}/api/process_files`, {
-          method: "POST",
-          body: formData,
-          signal: controller.signal,
-        })
+        // Tentative avec 3 essais en cas d'échec
+        let response = null
+        let attempt = 0
+        const maxAttempts = 3
+
+        while (attempt < maxAttempts && !response) {
+          try {
+            if (attempt > 0) {
+              setLoadMessage(`Nouvelle tentative (${attempt}/${maxAttempts})...`)
+              await new Promise((resolve) => setTimeout(resolve, 2000)) // Attendre 2 secondes entre les tentatives
+            }
+
+            response = await fetch(`${BACKEND_URL}/api/process_files`, {
+              method: "POST",
+              body: formData,
+              signal: abortControllerRef.current.signal,
+            })
+          } catch (fetchError) {
+            attempt++
+            if (attempt >= maxAttempts) throw fetchError
+            console.log(`Tentative ${attempt} échouée, nouvel essai...`)
+          }
+        }
 
         clearTimeout(timeoutId)
 
-        if (!response.ok) {
-          const errorText = await response.text()
+        if (!response || !response.ok) {
+          const errorText = await (response?.text() || Promise.resolve("Erreur de connexion au serveur"))
           let errorMessage = "Erreur lors de l'importation"
 
           try {
@@ -308,39 +411,69 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
         },
       ])
 
-      // Continuer avec la partie suivante malgré l'erreur
-      if (index < splitFiles.length - 1) {
-        setCurrentSplitFileIndex(index + 1)
-      } else {
-        // C'était la dernière partie
-        setProcessingAllParts(false)
-
-        // Afficher le résultat final
-        const successCount = processedFiles.length
-        const totalCount = splitFiles.length
-
-        if (successCount > 0) {
-          setResult({
-            success: true,
-            message: `Traitement terminé: ${successCount}/${totalCount} fichiers traités avec succès`,
-            details: splitFiles.map((f) => ({
-              filename: f.name,
-              success: !failedFiles.includes(f.name),
-              output_file: f.name,
-            })),
-          })
-        } else {
-          setResult({
-            success: false,
-            message: "Aucun fichier n'a pu être traité correctement",
-            details: [],
-          })
-        }
-      }
+      // Open retry dialog
+      setCurrentRetryIndex(index)
+      setRetryDialogOpen(true)
+      setProcessingAllParts(false) // Pause automatic processing
     } finally {
       setIsLoading(false)
       setProcessingStep(0)
       setLoadMessage("")
+    }
+  }
+
+  const handleRetry = async () => {
+    if (currentRetryIndex < 0 || currentRetryIndex >= splitFiles.length) return
+
+    // Increment retry attempts counter
+    setRetryAttempts((prev) => ({
+      ...prev,
+      [currentRetryIndex]: (prev[currentRetryIndex] || 0) + 1,
+    }))
+
+    setIsRetrying(true)
+    setRetryDialogOpen(false)
+
+    try {
+      // Wait a bit longer before retrying
+      await new Promise((resolve) => setTimeout(resolve, 5000)) // 5 seconds
+
+      // Remove the file from failed files list
+      setFailedFiles((prev) => prev.filter((name) => name !== splitFiles[currentRetryIndex].name))
+
+      // Retry processing
+      await handleImportSplitFile(splitFiles[currentRetryIndex], currentRetryIndex)
+
+      // Resume automatic processing if successful
+      setProcessingAllParts(true)
+    } catch (error) {
+      console.error("Retry failed:", error)
+    } finally {
+      setIsRetrying(false)
+    }
+  }
+
+  const handleSkipPart = () => {
+    setRetryDialogOpen(false)
+
+    // If not the last part, continue with the next one
+    if (currentRetryIndex < splitFiles.length - 1) {
+      setCurrentSplitFileIndex(currentRetryIndex + 1)
+      setProcessingAllParts(true) // Resume automatic processing
+    } else {
+      // It was the last part, show final result
+      const successCount = processedFiles.length
+      const totalCount = splitFiles.length
+
+      setResult({
+        success: successCount > 0,
+        message: `Traitement terminé: ${successCount}/${totalCount} fichiers traités avec succès`,
+        details: splitFiles.map((f) => ({
+          filename: f.name,
+          success: !failedFiles.includes(f.name),
+          output_file: f.name,
+        })),
+      })
     }
   }
 
@@ -349,6 +482,17 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
       toast({
         title: "Fichiers manquants",
         description: "Veuillez sélectionner tous les fichiers requis",
+        variant: "destructive",
+      })
+      return
+    }
+
+    // Check server availability first
+    const isAvailable = await checkServerAvailability()
+    if (!isAvailable) {
+      toast({
+        title: "Serveur indisponible",
+        description: "Le serveur n'est pas accessible. Veuillez vérifier votre connexion et réessayer.",
         variant: "destructive",
       })
       return
@@ -380,20 +524,45 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
       setProcessingStep(1)
       setLoadMessage(`Traitement du fichier ${dataFile.name}...`)
 
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 20 * 60 * 1000) // 20 minutes timeout
+      abortControllerRef.current = new AbortController()
+      const timeoutId = setTimeout(
+        () => {
+          if (abortControllerRef.current) {
+            abortControllerRef.current.abort()
+          }
+        },
+        30 * 60 * 1000,
+      ) // 30 minutes timeout
 
       try {
-        const response = await fetch(`${BACKEND_URL}/api/process_files`, {
-          method: "POST",
-          body: formData,
-          signal: controller.signal,
-        })
+        // Tentative avec 3 essais en cas d'échec
+        let response = null
+        let attempt = 0
+        const maxAttempts = 3
+
+        while (attempt < maxAttempts && !response) {
+          try {
+            if (attempt > 0) {
+              setLoadMessage(`Nouvelle tentative (${attempt}/${maxAttempts})...`)
+              await new Promise((resolve) => setTimeout(resolve, 2000)) // Attendre 2 secondes entre les tentatives
+            }
+
+            response = await fetch(`${BACKEND_URL}/api/process_files`, {
+              method: "POST",
+              body: formData,
+              signal: abortControllerRef.current.signal,
+            })
+          } catch (fetchError) {
+            attempt++
+            if (attempt >= maxAttempts) throw fetchError
+            console.log(`Tentative ${attempt} échouée, nouvel essai...`)
+          }
+        }
 
         clearTimeout(timeoutId)
 
-        if (!response.ok) {
-          const errorText = await response.text()
+        if (!response || !response.ok) {
+          const errorText = await (response?.text() || Promise.resolve("Erreur de connexion au serveur"))
           let errorMessage = "Erreur lors de l'importation"
 
           try {
@@ -556,10 +725,32 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
     setShowSizeWarning(false)
     setShowFileSplitter(false)
     setProcessingAllParts(false)
+    setRetryAttempts({})
+    setIsRetrying(false)
+    setCurrentRetryIndex(-1)
+    setRetryDialogOpen(false)
   }
 
   // Déterminer ce qui doit être affiché dans la zone principale
   const renderMainContent = () => {
+    // Si le serveur n'est pas disponible
+    if (!serverAvailable) {
+      return (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-red-800 flex flex-col items-center justify-center">
+          <AlertCircle className="h-10 w-10 text-red-500 mb-4" />
+          <h3 className="text-lg font-medium mb-2">Serveur indisponible</h3>
+          <p className="text-center mb-4">
+            Le serveur de traitement n'est pas accessible. Veuillez vérifier votre connexion ou contacter
+            l'administrateur.
+          </p>
+          <Button variant="outline" onClick={checkServerAvailability} className="gap-2">
+            <RefreshCw className="h-4 w-4" />
+            Vérifier la connexion
+          </Button>
+        </div>
+      )
+    }
+
     // Si on est en train de charger
     if (isLoading) {
       return (
@@ -959,9 +1150,7 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
             </Button>
 
             {fileExists && (
-
-
-                <Button
+              <Button
                 variant="outline"
                 size="sm"
                 className="bg-white text-red-600 border-red-200 hover:bg-red-50"
@@ -969,11 +1158,11 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
                   e.stopPropagation()
                   setIsPurgeOpen(true)
                 }}
-                >
+              >
                 <Trash2 className="h-4 w-4 mr-2" />
                 Purger les données
-                </Button>
-              )}
+              </Button>
+            )}
           </div>
         </DialogTrigger>
         <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
@@ -1001,7 +1190,7 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
                   </Button>
                   <Button
                     onClick={handleImport}
-                    disabled={isLoading || !dataFile || !mappingFile || showFileSplitter}
+                    disabled={isLoading || !dataFile || !mappingFile || showFileSplitter || !serverAvailable}
                     className="gap-2"
                   >
                     {isLoading ? (
@@ -1051,6 +1240,68 @@ export function ImportDialog({ fileExists }: ImportDialogProps) {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Dialogue de reprise après erreur */}
+      <AlertDialog open={retryDialogOpen} onOpenChange={setRetryDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-red-500" />
+              Échec du traitement
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              La partie {currentRetryIndex + 1} sur {splitFiles.length} n'a pas pu être traitée correctement.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          <div className="py-4">
+            <div className="rounded-lg border border-red-100 bg-red-50 p-3 text-red-800">
+              <p className="text-sm font-medium mb-1">Détails de l'erreur :</p>
+              <p className="text-sm">
+                {currentRetryIndex >= 0 && currentRetryIndex < splitFiles.length && (
+                  <>
+                    Le fichier <span className="font-medium">{splitFiles[currentRetryIndex].name}</span> n'a pas pu être
+                    traité. Cela peut être dû à un problème temporaire du serveur ou à un problème avec le fichier
+                    lui-même.
+                  </>
+                )}
+              </p>
+            </div>
+
+            <div className="mt-4 text-sm text-muted-foreground">
+              <p>Vous pouvez :</p>
+              <ul className="list-disc pl-5 mt-2 space-y-1">
+                <li>Réessayer le traitement de cette partie</li>
+                <li>Ignorer cette partie et continuer avec les suivantes</li>
+              </ul>
+            </div>
+          </div>
+
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={handleSkipPart} disabled={isRetrying}>
+              Ignorer cette partie
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleRetry}
+              disabled={isRetrying || (retryAttempts[currentRetryIndex] || 0) >= 3}
+              className="gap-2"
+            >
+              {isRetrying ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Réessai en cours...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="h-4 w-4" />
+                  Réessayer
+                  {retryAttempts[currentRetryIndex] ? ` (${retryAttempts[currentRetryIndex]}/3)` : ""}
+                </>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Modal de confirmation de purge */}
       <AlertDialog open={isPurgeOpen} onOpenChange={setIsPurgeOpen}>
