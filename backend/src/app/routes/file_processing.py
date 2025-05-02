@@ -343,7 +343,23 @@ async def append_to_csv_optimized(processed_df: pd.DataFrame, combined_output_pa
     logger.info(f"🔄 APPEND OPERATION: {combined_output_path.name}")
     logger.info(f"Data to append: {len(processed_df)} rows, {len(processed_df.columns)} columns")
     logger.info("=" * 80)
-    
+
+    if len(processed_df.columns) > 30:
+        # Define the target 28-column schema
+        target_columns = [
+            "FIRST_NAME", "BIRTH_NAME", "MIDDLE_NAME", "LAST_NAME", "SEX", "BIRTH_DATE", 
+            "COGVILLE", "COGPAYS", "BIRTH_CITY", "BIRTH_COUNTRY", "EMAIL", "CREATED_DATE", 
+            "ARCHIVED_DATE", "UUID", "ID_CCU", "SUBSCRIPTION_CHANNEL", "VERIFICATION_MODE", 
+            "VERIFICATION_DATE", "USER_STATUS", "2FA_STATUS", "TELEPHONE", "INDICATIF", 
+            "DATE_MODF_TEL", "Numero Pi", "EXPIRATION", "EMISSION", "TYPE", "Operateur"
+        ]
+
+        # Add missing columns with NaN
+        for col in target_columns:
+            if col not in processed_df.columns:
+                processed_df[col] = pd.NA
+        # Reorder columns to match the target schema
+        processed_df = processed_df[target_columns]
     try:
         # Update job status
         if job_id in JOBS:
